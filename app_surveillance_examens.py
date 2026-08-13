@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, date, timedelta
 import io
+import os
 
 # ═══════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -14,24 +15,36 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.markdown("""
+st.markdown('''
 <style>
     .main-header { font-size: 2rem; font-weight: 700; color: #1f77b4; margin-bottom: 1rem; }
     .sub-header { font-size: 1.2rem; font-weight: 600; color: #333; margin-top: 1rem; margin-bottom: 0.5rem; }
+    .info-box { background-color: #e8f4f8; border-left: 4px solid #1f77b4; padding: 1rem; border-radius: 4px; margin-bottom: 1rem; }
+    .success-box { background-color: #e8f5e9; border-left: 4px solid #4caf50; padding: 1rem; border-radius: 4px; margin-bottom: 1rem; }
 </style>
-""", unsafe_allow_html=True)
+''', unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════════
 # FONCTIONS UTILITAIRES
 # ═══════════════════════════════════════════════════════════════
 @st.cache_data
-def load_excel(file):
-    """Charge un fichier Excel."""
+def load_excel_path(filepath):
+    try:
+        df = pd.read_excel(filepath, engine="openpyxl")
+        if len(df) > 0 and (df.iloc[0].astype(str) == df.columns).all():
+            df = df.iloc[1:].reset_index(drop=True)
+        df.columns = [str(c).strip() for c in df.columns]
+        return df
+    except Exception:
+        return None
+
+
+@st.cache_data
+def load_excel_file(file):
     try:
         df = pd.read_excel(file, engine="openpyxl")
-        # Supprimer les lignes d'en-tête dupliquées si présentes
-        if (df.iloc[0] == df.columns).all():
+        if len(df) > 0 and (df.iloc[0].astype(str) == df.columns).all():
             df = df.iloc[1:].reset_index(drop=True)
         df.columns = [str(c).strip() for c in df.columns]
         return df
@@ -41,22 +54,21 @@ def load_excel(file):
 
 
 def parse_horaire(horaire_str):
-    """Convertit '11h-12h30' en (debut, fin) en heures décimales."""
     if pd.isna(horaire_str):
         return (0, 0)
-    h = str(horaire_str).strip().replace(" ", "")
+    h = str(horaire_str).strip().replace(" ", "").replace("–", "-")
     try:
         parts = h.split("-")
         if len(parts) != 2:
             return (0, 0)
 
         def to_dec(t):
-            t = t.strip().lower().replace("h", ":")
+            t = t.strip().lower().replace("h", ":").replace("H", ":")
             if ":" in t:
                 hh, mm = t.split(":")[:2]
                 return int(hh) + int(mm) / 60
             else:
-                return int(t)
+                return int(t) if t.isdigit() else 0
 
         return (to_dec(parts[0]), to_dec(parts[1]))
     except Exception:
@@ -64,61 +76,104 @@ def parse_horaire(horaire_str):
 
 
 def chevauchement(h1, h2):
-    """Vérifie si deux créneaux horaires se chevauchent."""
     return not (h1[1] <= h2[0] or h2[1] <= h1[0])
 
 
 def get_jour_index(jour_str):
-    """Convertit un jour en index (0=Lundi ... 6=Dimanche)."""
     jours = {"lundi": 0, "mardi": 1, "mercredi": 2, "jeudi": 3,
              "vendredi": 4, "samedi": 5, "dimanche": 6}
     return jours.get(str(jour_str).strip().lower(), 0)
 
 
+def detecter_qualite(qualite_str):
+    q = str(qualite_str).strip().lower()
+    if "permanent" in q or "permenant" in q or "associé" in q:
+        return "Permanent"
+    elif "vacataire" in q:
+        return "Vacataire"
+    elif "retraité" in q:
+        return "Retraité"
+    elif "disponibilité" in q:
+        return "Disponibilité"
+    else:
+        return "Autre"
+
+
+def charger_fichiers_auto():
+    chemins_ens = [
+        "Liste des enseignants-2026-2027.xlsx",
+        "data/Liste des enseignants-2026-2027.xlsx",
+        "assets/Liste des enseignants-2026-2027.xlsx",
+        "./Liste des enseignants-2026-2027.xlsx"
+    ]
+    chemins_exam = [
+        "DATA-ENS-2026-2027.xlsx",
+        "data/DATA-ENS-2026-2027.xlsx",
+        "assets/DATA-ENS-2026-2027.xlsx",
+        "./DATA-ENS-2026-2027.xlsx"
+    ]
+
+    df_ens = None
+    df_exam = None
+    ens_path = None
+    exam_path = None
+
+    for p in chemins_ens:
+        if os.path.exists(p):
+            df_ens = load_excel_path(p)
+            if df_ens is not None and not df_ens.empty:
+                ens_path = p
+                break
+
+    for p in chemins_exam:
+        if os.path.exists(p):
+            df_exam = load_excel_path(p)
+            if df_exam is not None and not df_exam.empty:
+                exam_path = p
+                break
+
+    return df_ens, df_exam, ens_path, exam_path
+
+
 def attribuer_surveillants(df_examens, df_enseignants, quota_perm,
                              quota_vac, quota_autre, nb_surv_lieu):
-    """
-    Attribue les surveillants aux examens.
-    Règles :
-      - Un enseignant ne surveille pas son propre examen.
-      - Un enseignant ne peut être sur deux examens simultanés.
-      - Respect des quotas globaux par catégorie.
-    """
     if df_examens is None or df_enseignants is None:
         return None
 
-    # Normaliser les colonnes
-    if "Enseignants" not in df_enseignants.columns:
-        for c in df_enseignants.columns:
-            if "enseignant" in c.lower():
-                df_enseignants = df_enseignants.rename(columns={c: "Enseignants"})
-                break
+    col_ens = None
+    for c in df_enseignants.columns:
+        if "enseignant" in c.lower():
+            col_ens = c
+            break
+    if col_ens and col_ens != "Enseignants":
+        df_enseignants = df_enseignants.rename(columns={col_ens: "Enseignants"})
 
-    # Préparer la liste des surveillants disponibles
     surveillants = []
     for _, row in df_enseignants.iterrows():
         nom = str(row.get("Enseignants", "")).strip()
-        if not nom or nom.lower() in ["non défini", "nan", ""]:
+        if not nom or nom.lower() in ["non défini", "nan", "", "none"]:
             continue
-        qualite = str(row.get("Qualité", "Autre")).strip()
+
+        qualite_brute = str(row.get("Qualité", "Autre")).strip()
+        cat = detecter_qualite(qualite_brute)
         grade = str(row.get("Grade", "")).strip()
         email = str(row.get("Email", "")).strip()
         tel = str(row.get("N°/TEL", "")).strip()
 
-        cat = "Autre"
-        if "permanent" in qualite.lower() or "permenant" in qualite.lower():
-            cat = "Permanent"
-        elif "vacataire" in qualite.lower():
-            cat = "Vacataire"
+        quota = quota_autre
+        if cat == "Permanent":
+            quota = quota_perm
+        elif cat == "Vacataire":
+            quota = quota_vac
 
         surveillants.append({
             "nom": nom,
+            "qualite": qualite_brute,
             "categorie": cat,
             "grade": grade,
             "email": email,
             "tel": tel,
-            "quota": quota_perm if cat == "Permanent" else (
-                quota_vac if cat == "Vacataire" else quota_autre),
+            "quota": quota,
             "assignations": 0
         })
 
@@ -126,7 +181,6 @@ def attribuer_surveillants(df_examens, df_enseignants, quota_perm,
         st.warning("Aucun enseignant valide trouvé dans le fichier.")
         return None
 
-    # Trier les examens par jour et horaire
     df_ex = df_examens.copy()
     df_ex["jour_idx"] = df_ex["Jours"].apply(get_jour_index)
     df_ex["horaire_tuple"] = df_ex["Horaire"].apply(parse_horaire)
@@ -143,11 +197,9 @@ def attribuer_surveillants(df_examens, df_enseignants, quota_perm,
         code = examen.get("Code", "")
         enseignant_cours = str(examen.get("Enseignants", "")).strip()
 
-        # Déterminer le nombre de surveillants nécessaires
         nb_salles = max(1, len(str(lieu).split("/")))
         nb_needed = nb_surv_lieu * nb_salles
 
-        # Filtrer les surveillants disponibles
         disponibles = []
         for s in surveillants:
             if s["nom"].lower() == enseignant_cours.lower():
@@ -174,7 +226,7 @@ def attribuer_surveillants(df_examens, df_enseignants, quota_perm,
             s["assignations"] += 1
 
         if not choisis:
-            choisis = [{"nom": "NON ATTRIBUÉ", "categorie": "-",
+            choisis = [{"nom": "NON ATTRIBUÉ", "qualite": "-", "categorie": "-",
                         "grade": "-", "email": "-", "tel": "-"}]
 
         for s in choisis:
@@ -188,6 +240,7 @@ def attribuer_surveillants(df_examens, df_enseignants, quota_perm,
                 "Lieu": lieu,
                 "Enseignant_Cours": enseignant_cours,
                 "Surveillant": s["nom"],
+                "Qualité": s["qualite"],
                 "Catégorie": s["categorie"],
                 "Grade": s["grade"],
                 "Email": s["email"],
@@ -198,7 +251,6 @@ def attribuer_surveillants(df_examens, df_enseignants, quota_perm,
 
 
 def calculer_dates(df_planning, date_debut, jours_feries):
-    """Calcule les dates exactes des examens à partir du jour de la semaine."""
     if df_planning is None or df_planning.empty:
         return df_planning
 
@@ -227,7 +279,6 @@ def calculer_dates(df_planning, date_debut, jours_feries):
 
 
 def to_excel_download(df):
-    """Convertit un DataFrame en bytes Excel pour téléchargement."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Planning")
@@ -243,25 +294,40 @@ def main():
         unsafe_allow_html=True
     )
 
+    df_ens_auto, df_exam_auto, ens_path, exam_path = charger_fichiers_auto()
+
     with st.sidebar:
         st.header("⚙️ Configuration")
 
-        st.markdown('<div class="sub-header">📁 Fichiers Source</div>',
+        if df_ens_auto is not None and df_exam_auto is not None:
+            st.markdown(
+                '<div class="success-box">✅ Fichiers chargés automatiquement</div>',
+                unsafe_allow_html=True
+            )
+            st.caption(f"📁 {ens_path}")
+            st.caption(f"📁 {exam_path}")
+        else:
+            st.markdown(
+                '<div class="info-box">⚠️ Fichiers non trouvés en auto. Utilisez l\'upload ci-dessous.</div>',
+                unsafe_allow_html=True
+            )
+
+        st.markdown('<div class="sub-header">📁 Fichiers Source (fallback)</div>',
                     unsafe_allow_html=True)
-        file_ens = st.file_uploader("Enseignants", type=["xlsx", "xls"])
-        file_exam = st.file_uploader("Examens", type=["xlsx", "xls"])
+        file_ens = st.file_uploader("Enseignants", type=["xlsx", "xls"], key="up_ens")
+        file_exam = st.file_uploader("Examens", type=["xlsx", "xls"], key="up_exam")
 
         st.markdown('<div class="sub-header">📊 Quotas de Surveillance</div>',
                     unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1:
             quota_perm = st.number_input("Permanent", min_value=0,
-                                          max_value=20, value=3, step=1)
+                                          max_value=50, value=5, step=1)
             quota_autre = st.number_input("Autre", min_value=0,
-                                           max_value=20, value=1, step=1)
+                                           max_value=50, value=2, step=1)
         with col2:
             quota_vac = st.number_input("Vacataire", min_value=0,
-                                         max_value=20, value=2, step=1)
+                                         max_value=50, value=4, step=1)
             nb_surv_lieu = st.number_input("Surveillants par lieu",
                                             min_value=1, max_value=10,
                                             value=2, step=1)
@@ -283,17 +349,22 @@ def main():
         else:
             jours_feries = jours_feries_input
 
-    df_ens = None
-    df_exam = None
+    if file_ens is not None:
+        df_ens = load_excel_file(file_ens)
+    else:
+        df_ens = df_ens_auto
 
-    if file_ens:
-        df_ens = load_excel(file_ens)
-    if file_exam:
-        df_exam = load_excel(file_exam)
+    if file_exam is not None:
+        df_exam = load_excel_file(file_exam)
+    else:
+        df_exam = df_exam_auto
 
     if df_ens is not None:
-        with st.expander("👁️ Aperçu Enseignants"):
+        with st.expander("👁️ Aperçu Enseignants (avec Qualité)"):
             st.dataframe(df_ens.head(20), use_container_width=True)
+            if "Qualité" in df_ens.columns:
+                st.markdown("**Répartition par Qualité :**")
+                st.write(df_ens["Qualité"].value_counts())
 
     if df_exam is not None:
         with st.expander("👁️ Aperçu Examens"):
@@ -326,6 +397,11 @@ def main():
                     st.error(
                         "Impossible de générer le planning. Vérifiez vos fichiers."
                     )
+    else:
+        st.info(
+            "👈 Les fichiers ne sont pas encore disponibles. "
+            "Placez-les à la racine du projet ou uploadez-les manuellement."
+        )
 
     if "planning" in st.session_state and st.session_state["planning"] is not None:
         df_planning = st.session_state["planning"]
@@ -351,16 +427,29 @@ def main():
 
         if stats_surv:
             st.markdown(
-                '<div class="sub-header">📈 Répartition des surveillances</div>',
+                '<div class="sub-header">📈 Répartition par Qualité</div>',
                 unsafe_allow_html=True
             )
             stats_df = pd.DataFrame([
-                {"Nom": s["nom"], "Catégorie": s["categorie"],
-                 "Assignations": s["assignations"]}
+                {"Nom": s["nom"], "Qualité": s["qualite"],
+                 "Catégorie": s["categorie"], "Grade": s["grade"],
+                 "Quota": s["quota"], "Assignations": s["assignations"],
+                 "Reste": s["quota"] - s["assignations"]}
                 for s in stats_surv
             ])
             stats_df = stats_df.sort_values("Assignations", ascending=False)
             st.dataframe(stats_df, use_container_width=True, hide_index=True)
+
+            st.markdown("**Synthèse par Catégorie :**")
+            cat_summary = stats_df.groupby("Catégorie").agg(
+                Total=("Nom", "count"),
+                Assignations=("Assignations", "sum"),
+                Quota_total=("Quota", "sum")
+            ).reset_index()
+            cat_summary["Utilisation %"] = (
+                cat_summary["Assignations"] / cat_summary["Quota_total"] * 100
+            ).round(1)
+            st.dataframe(cat_summary, use_container_width=True, hide_index=True)
 
         st.markdown('<div class="sub-header">🗓️ Planning Complet</div>',
                     unsafe_allow_html=True)
@@ -387,10 +476,6 @@ def main():
                 mime="text/csv",
                 use_container_width=True
             )
-    else:
-        st.info(
-            "👈 Veuillez charger les deux fichiers et cliquer sur 'Générer le planning'."
-        )
 
 
 if __name__ == "__main__":
