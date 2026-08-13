@@ -1113,5 +1113,4 @@ def main():
             st.markdown(generer_tableau_html(attributions), unsafe_allow_html=True)
         else:
             st.warning("⚠️ Aucune attribution à exporter. Veuillez d'abord attribuer les surveillants.")
-
-        if __name__ == "__main__":main()
+if __name__ == "__main__":main()
