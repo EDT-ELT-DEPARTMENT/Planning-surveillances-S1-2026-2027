@@ -13,162 +13,98 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 import os
+import re
 
 # ============================================================
-# CONFIGURATION DE LA PAGE
+# CONFIGURATION
 # ============================================================
 st.set_page_config(
-    page_title="Gestion des Surveillances d\'Examens S1 2026-2027",
+    page_title="Surveillances Examens S1 2026-2027",
     page_icon="📋",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ============================================================
-# STYLES CSS PERSONNALISES
-# ============================================================
 st.markdown("""
 <style>
-    .main-header {
-        font-size: 2.2rem;
-        font-weight: bold;
-        color: #1f4e79;
-        text-align: center;
-        padding: 1rem;
-        background: linear-gradient(90deg, #e3f2fd 0%, #bbdefb 100%);
-        border-radius: 10px;
-        margin-bottom: 1.5rem;
-    }
-    .sub-header {
-        font-size: 1.4rem;
-        font-weight: bold;
-        color: #1565c0;
-        margin-top: 1rem;
-        margin-bottom: 0.5rem;
-        border-bottom: 2px solid #1565c0;
-        padding-bottom: 0.3rem;
-    }
-    .info-box {
-        background-color: #e3f2fd;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #1565c0;
-        margin: 0.5rem 0;
-    }
-    .success-box {
-        background-color: #e8f5e9;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #2e7d32;
-        margin: 0.5rem 0;
-    }
-    .warning-box {
-        background-color: #fff3e0;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #f57c00;
-        margin: 0.5rem 0;
-    }
-    .card {
-        background-color: #fafafa;
-        padding: 1rem;
-        border-radius: 8px;
-        border: 1px solid #e0e0e0;
-        margin: 0.5rem 0;
-    }
+    .main-header { font-size: 2.2rem; font-weight: bold; color: #1f4e79; text-align: center;
+        padding: 1rem; background: linear-gradient(90deg, #e3f2fd 0%, #bbdefb 100%);
+        border-radius: 10px; margin-bottom: 1.5rem; }
+    .sub-header { font-size: 1.4rem; font-weight: bold; color: #1565c0;
+        margin-top: 1rem; margin-bottom: 0.5rem; border-bottom: 2px solid #1565c0; padding-bottom: 0.3rem; }
+    .info-box { background-color: #e3f2fd; padding: 1rem; border-radius: 8px;
+        border-left: 4px solid #1565c0; margin: 0.5rem 0; }
+    .success-box { background-color: #e8f5e9; padding: 1rem; border-radius: 8px;
+        border-left: 4px solid #2e7d32; margin: 0.5rem 0; }
+    .warning-box { background-color: #fff3e0; padding: 1rem; border-radius: 8px;
+        border-left: 4px solid #f57c00; margin: 0.5rem 0; }
+    .card { background-color: #fafafa; padding: 1rem; border-radius: 8px;
+        border: 1px solid #e0e0e0; margin: 0.5rem 0; }
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #f5f5f5;
-        border-radius: 8px 8px 0 0;
-        padding: 10px 20px;
-        font-weight: 600;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #1565c0 !important;
-        color: white !important;
-    }
+    .stTabs [data-baseweb="tab"] { background-color: #f5f5f5; border-radius: 8px 8px 0 0;
+        padding: 10px 20px; font-weight: 600; }
+    .stTabs [aria-selected="true"] { background-color: #1565c0 !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ============================================================
-# CONSTANTES
-# ============================================================
+# Constantes
 SALLES = [f"S{i:02d}" for i in range(1, 18)]   # S01 a S17
 AMPHIS = [f"A{i:02d}" for i in range(1, 13)]   # A01 a A12
-LIEUX = SALLES + AMPHIS
-
-CRENEAUX_HORAIRES = [
-    "08h30 - 10h30",
-    "11h00 - 13h00",
-    "13h30 - 15h30"
-]
-
-JOURS_FR = {
-    "Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi",
-    "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"
-}
-
+CRENEAUX = ["08h30 - 10h30", "11h00 - 13h00", "13h30 - 15h30"]
+JOURS_FR = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi",
+            "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
 FICHIER_SOURCE = "DATA-ENS-2026-2027_surveillances.xlsx"
 
 # ============================================================
-# FONCTIONS UTILITAIRES
+# SESSION STATE
 # ============================================================
-
 def init_session_state():
     defaults = {
-        'enseignants_df': None,
-        'examens_df': None,
-        'planning_df': None,
-        'surveillance_df': None,
-        'nb_surv_permanent': 3,
-        'nb_surv_vacataire': 2,
-        'nb_surv_autre': 1,
-        'nb_surv_par_lieu': 2,
-        'exclus_manuels': [],
-        'date_debut_val': date(2026, 11, 1),
-        'jours_feries': [],
-        'config_creneaux': {},
-        'promo_selected': None,
-        'salles_selected': ['S01', 'S02', 'S03', 'S04', 'S05'],
-        'amphis_selected': ['A01', 'A02', 'A03'],
-        'data_loaded': False,
-        'promotions_list': [],
-        'permanents_list': [],
-        'vacataires_list': [],
-        'all_enseignants_list': []
+        'enseignants_df': None, 'examens_df': None, 'planning_df': None,
+        'surveillance_df': None, 'nb_surv_permanent': 3, 'nb_surv_vacataire': 2,
+        'nb_surv_autre': 1, 'nb_surv_par_lieu': 2, 'exclus_manuels': [],
+        'date_debut_val': date(2026, 11, 1), 'jours_feries': [],
+        'promo_selected': None, 'data_loaded': False, 'promotions_list': [],
+        'permanents_list': [], 'vacataires_list': [], 'all_enseignants_list': [],
+        'ordre_matieres': {}, 'lieux_par_promo': {}
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
+# ============================================================
+# FONCTIONS
+# ============================================================
+
 def normaliser_qualite(val):
     val = str(val).strip().lower()
-    mapping = {
-        'permanent': 'Permanent',
-        'vacataire': 'Vacataire',
-        'contractuel': 'Contractuel',
-        'autre': 'Autre',
-        'professeur': 'Permanent',
-        'charge de cours': 'Vacataire',
-        'charge_de_cours': 'Vacataire',
-        'doctorant': 'Vacataire',
-        'maitre de conferences': 'Permanent',
-        'mc': 'Permanent',
-        'prof': 'Permanent'
-    }
+    mapping = {'permanent': 'Permanent', 'vacataire': 'Vacataire',
+               'contractuel': 'Contractuel', 'autre': 'Autre',
+               'professeur': 'Permanent', 'charge de cours': 'Vacataire',
+               'charge_de_cours': 'Vacataire', 'doctorant': 'Vacataire',
+               'maitre de conferences': 'Permanent', 'mc': 'Permanent', 'prof': 'Permanent'}
     return mapping.get(val, 'Permanent')
 
+def est_cours(enseignement_str):
+    """Verifie si l'enseignement est un Cours (exclut TD et TP)"""
+    val = str(enseignement_str).strip()
+    # Accepte: Cours-xxx, COURS xxx, cours: xxx, commence par Cours
+    return bool(re.match(r'^[Cc][Oo][Uu][Rr][Ss]', val))
+
+def extraire_nom_cours(enseignement_str):
+    """Extrait le nom du cours apres le prefixe Cours-"""
+    val = str(enseignement_str).strip()
+    # Enlever le prefixe Cours-, Cours:, Cours etc.
+    nom = re.sub(r'^[Cc][Oo][Uu][Rr][Ss][ \-_:]+', '', val).strip()
+    return nom if nom else val
+
 def charger_fichier_source_auto():
-    """Charge automatiquement le fichier source Excel"""
+    """Charge le fichier et filtre uniquement les Cours"""
     try:
-        # Chercher dans plusieurs emplacements possibles
-        paths_to_try = [
-            FICHIER_SOURCE,
-            os.path.join(os.getcwd(), FICHIER_SOURCE),
+        paths_to_try = [FICHIER_SOURCE, os.path.join(os.getcwd(), FICHIER_SOURCE),
             os.path.join(os.path.dirname(os.path.abspath(__file__)), FICHIER_SOURCE),
             os.path.join("/mnt/agents/upload/", FICHIER_SOURCE),
-            os.path.join("/mount/src/planning-surveillances-s1-2026-2027/", FICHIER_SOURCE),
-        ]
+            os.path.join("/mount/src/planning-surveillances-s1-2026-2027/", FICHIER_SOURCE)]
 
         file_path = None
         for p in paths_to_try:
@@ -177,44 +113,30 @@ def charger_fichier_source_auto():
                 break
 
         if file_path is None:
-            return None, f"Fichier {FICHIER_SOURCE} non trouve. Chemins testes: {paths_to_try}"
+            return None, f"Fichier {FICHIER_SOURCE} non trouve"
 
-        # Lire toutes les feuilles
         xls = pd.ExcelFile(file_path)
         sheet_names = xls.sheet_names
-
-        # Chercher la feuille contenant les enseignants (colonne Qualite et Enseignements)
         ens_sheet = None
-        exam_sheet = None
 
         for sheet in sheet_names:
             df_test = pd.read_excel(file_path, sheet_name=sheet, nrows=5)
             cols_lower = [str(c).lower().strip() for c in df_test.columns]
-
-            # Detecter feuille enseignants (doit avoir Qualite et Enseignements)
             has_qualite = any('qualite' in c or 'quality' in c or 'statut' in c or 'grade' in c for c in cols_lower)
             has_enseignements = any('enseignement' in c or 'cours' in c or 'matiere' in c or 'module' in c for c in cols_lower)
             has_nom = any('nom' in c or 'name' in c or 'enseignant' in c for c in cols_lower)
-
             if has_qualite and has_enseignements and has_nom:
                 ens_sheet = sheet
-            elif has_enseignements and not has_qualite:
-                # Peut-etre une feuille examens
-                exam_sheet = sheet
+                break
 
-        # Si pas trouve, prendre la premiere feuille comme enseignants
         if ens_sheet is None and len(sheet_names) > 0:
             ens_sheet = sheet_names[0]
 
-        # Charger enseignants
         df_ens = pd.read_excel(file_path, sheet_name=ens_sheet)
-
-        # Normaliser noms de colonnes
         df_ens.columns = [str(col).strip() for col in df_ens.columns]
         cols_orig = list(df_ens.columns)
         cols_lower = [c.lower().strip().replace(' ', '_').replace('-', '_') for c in cols_orig]
 
-        # Mapping des colonnes
         col_map = {}
         for i, c in enumerate(cols_lower):
             if any(x in c for x in ['nom', 'name', 'enseignant', 'prenom_nom', 'nom_prenom', 'professeur']):
@@ -226,22 +148,14 @@ def charger_fichier_source_auto():
             elif any(x in c for x in ['promotion', 'niveau', 'annee', 'class', 'promo', 'niveaux']):
                 col_map['promotion'] = cols_orig[i]
 
-        # Renommer
         rename_map = {}
-        if 'nom' in col_map:
-            rename_map[col_map['nom']] = 'nom'
-        if 'qualite' in col_map:
-            rename_map[col_map['qualite']] = 'qualite'
-        if 'enseignements' in col_map:
-            rename_map[col_map['enseignements']] = 'enseignements'
-        if 'promotion' in col_map:
-            rename_map[col_map['promotion']] = 'promotion'
-
+        if 'nom' in col_map: rename_map[col_map['nom']] = 'nom'
+        if 'qualite' in col_map: rename_map[col_map['qualite']] = 'qualite'
+        if 'enseignements' in col_map: rename_map[col_map['enseignements']] = 'enseignements'
+        if 'promotion' in col_map: rename_map[col_map['promotion']] = 'promotion'
         df_ens = df_ens.rename(columns=rename_map)
 
-        # Colonnes obligatoires
         if 'nom' not in df_ens.columns:
-            # Essayer de trouver une colonne avec des noms
             for col in df_ens.columns:
                 if df_ens[col].dtype == 'object':
                     sample = df_ens[col].dropna().astype(str)
@@ -249,74 +163,64 @@ def charger_fichier_source_auto():
                         df_ens['nom'] = df_ens[col]
                         break
 
-        if 'qualite' not in df_ens.columns:
-            df_ens['qualite'] = 'Permanent'
+        for col in ['qualite', 'enseignements', 'promotion']:
+            if col not in df_ens.columns:
+                df_ens[col] = ''
 
-        if 'enseignements' not in df_ens.columns:
-            df_ens['enseignements'] = ''
-
-        if 'promotion' not in df_ens.columns:
-            df_ens['promotion'] = ''
-
-        # Nettoyer : enlever les lignes sans nom
+        # Nettoyer
         df_ens = df_ens[df_ens['nom'].notna() & (df_ens['nom'].astype(str).str.strip() != '')].copy()
-
-        # Normaliser qualite
         df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)
 
-        # Nettoyer enseignements (uniquement les cours non vides)
-        df_ens['enseignements'] = df_ens['enseignements'].fillna('').astype(str)
-        df_ens = df_ens[df_ens['enseignements'].str.strip() != ''].copy()
-
-        # Extraire promotions uniques
-        promotions = []
-        if 'promotion' in df_ens.columns:
-            promos = df_ens['promotion'].dropna().astype(str).str.strip()
-            promos = promos[promos != '']
-            promotions = sorted(promos.unique().tolist())
-
-        # Creer dataframe examens a partir des enseignements
+        # === FILTRER UNIQUEMENT LES COURS ===
+        # La colonne enseignements peut contenir plusieurs valeurs separees par virgule
         examens_data = []
         for _, row in df_ens.iterrows():
-            matieres = str(row.get('enseignements', '')).split(',')
-            for m in matieres:
-                m = m.strip()
-                if m:
+            raw_ens = str(row.get('enseignements', ''))
+            # Separer par virgule, point-virgule ou slash
+            items = re.split(r'[,;/]+', raw_ens)
+            for item in items:
+                item = item.strip()
+                if item and est_cours(item):
+                    nom_cours = extraire_nom_cours(item)
                     examens_data.append({
-                        'matiere': m,
+                        'matiere': nom_cours,
                         'promotion': str(row.get('promotion', '')).strip(),
                         'enseignant': str(row.get('nom', '')).strip(),
                         'qualite_ens': row.get('qualite', 'Permanent'),
-                        'date': None,
-                        'creneau': None,
-                        'lieu': None
+                        'date': None, 'creneau': None, 'lieu': None,
+                        'ordre': 999  # Ordre par defaut
                     })
 
         df_exam = pd.DataFrame(examens_data)
 
-        # Ajouter colonnes de comptage
+        # Supprimer les doublons exacts
+        df_exam = df_exam.drop_duplicates(subset=['matiere', 'promotion', 'enseignant']).copy()
+
+        # Si un cours apparait plusieurs fois pour la meme promotion avec des enseignants differents,
+        # on garde la premiere occurrence
+        df_exam = df_exam.sort_values('enseignant').drop_duplicates(subset=['matiere', 'promotion'], keep='first').copy()
+
         df_ens['nb_surveillance'] = 0
         df_ens['surveillance_attribuee'] = 0
 
-        # Listes
+        promotions = sorted(df_exam['promotion'].dropna().astype(str).str.strip().unique().tolist())
+        promotions = [p for p in promotions if p != '']
+
         permanents = df_ens[df_ens['qualite'] == 'Permanent']['nom'].dropna().unique().tolist()
         vacataires = df_ens[df_ens['qualite'] == 'Vacataire']['nom'].dropna().unique().tolist()
         all_ens = df_ens['nom'].dropna().unique().tolist()
 
         return {
-            'enseignants': df_ens,
-            'examens': df_exam,
-            'promotions': promotions,
-            'permanents': permanents,
-            'vacataires': vacataires,
-            'all_enseignants': all_ens,
-            'sheet_used': ens_sheet
+            'enseignants': df_ens, 'examens': df_exam, 'promotions': promotions,
+            'permanents': permanents, 'vacataires': vacataires,
+            'all_enseignants': all_ens, 'sheet_used': ens_sheet
         }, None
 
     except Exception as e:
         return None, str(e)
 
 def est_jour_travaille(date_obj, jours_feries):
+    """Vendredi et Samedi exclus. Dimanche est travaillable."""
     if isinstance(date_obj, datetime):
         date_obj = date_obj.date()
     elif isinstance(date_obj, str):
@@ -328,9 +232,11 @@ def est_jour_travaille(date_obj, jours_feries):
     jour_semaine = date_obj.strftime("%A")
     jour_fr = JOURS_FR.get(jour_semaine, jour_semaine)
 
-    if jour_fr in ["Vendredi", "Samedi", "Dimanche"]:
+    # UNIQUEMENT Vendredi et Samedi exclus
+    if jour_fr in ["Vendredi", "Samedi"]:
         return False
 
+    # Jours feries
     for jf in jours_feries:
         if isinstance(jf, str):
             try:
@@ -343,15 +249,22 @@ def est_jour_travaille(date_obj, jours_feries):
             return False
     return True
 
-def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, creneaux, lieux):
-    """Genere le planning pour une promotion specifique"""
+def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, creneaux, lieux, ordre_matieres=None):
+    """Genere le planning pour une promotion avec ordre des matieres"""
     if examens_df is None or examens_df.empty:
         return None
 
     promo_df = examens_df[examens_df['promotion'].astype(str).str.strip() == str(promotion).strip()].copy()
-
     if promo_df.empty:
         return None
+
+    # Appliquer l'ordre personnalise si fourni
+    if ordre_matieres and promotion in ordre_matieres:
+        ordre_map = {m: i for i, m in enumerate(ordre_matieres[promotion])}
+        promo_df['ordre'] = promo_df['matiere'].map(ordre_map).fillna(999).astype(int)
+        promo_df = promo_df.sort_values('ordre')
+    else:
+        promo_df = promo_df.sort_values('matiere')
 
     date_courante = date_debut
     nb_creneaux = len(creneaux)
@@ -385,23 +298,11 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
 
     surveillants = enseignants_df.copy()
     surveillants['surveillance_attribuee'] = 0
-
     exclus = st.session_state.get('exclus_manuels', [])
 
-    permanents = surveillants[
-        (surveillants['qualite'] == 'Permanent') & 
-        (~surveillants['nom'].isin(exclus))
-    ].copy().sort_values('surveillance_attribuee')
-
-    vacataires = surveillants[
-        (surveillants['qualite'] == 'Vacataire') & 
-        (~surveillants['nom'].isin(exclus))
-    ].copy().sort_values('surveillance_attribuee')
-
-    autres = surveillants[
-        (~surveillants['qualite'].isin(['Permanent', 'Vacataire'])) &
-        (~surveillants['nom'].isin(exclus))
-    ].copy().sort_values('surveillance_attribuee')
+    permanents = surveillants[(surveillants['qualite'] == 'Permanent') & (~surveillants['nom'].isin(exclus))].copy().sort_values('surveillance_attribuee')
+    vacataires = surveillants[(surveillants['qualite'] == 'Vacataire') & (~surveillants['nom'].isin(exclus))].copy().sort_values('surveillance_attribuee')
+    autres = surveillants[(~surveillants['qualite'].isin(['Permanent', 'Vacataire'])) & (~surveillants['nom'].isin(exclus))].copy().sort_values('surveillance_attribuee')
 
     attributions = []
 
@@ -437,7 +338,7 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
         liste_surveillants = []
 
         # 1. Enseignant charge de la matiere (prioritaire)
-        if enseignant_matiere and str(enseignant_matiere) != 'nan' and str(enseignant_matiere).strip() != '':
+        if enseignant_matiere and str(enseignant_matiere) not in ['nan', '', 'None']:
             ens_info = surveillants[surveillants['nom'] == enseignant_matiere]
             if not ens_info.empty:
                 nom_ens = ens_info.iloc[0]['nom']
@@ -448,9 +349,7 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                     current_count = surveillants.loc[surveillants['nom'] == nom_ens, 'surveillance_attribuee'].values[0]
                     if current_count < quota:
                         liste_surveillants.append({
-                            'nom': nom_ens,
-                            'qualite': qualite_ens,
-                            'priorite': 'Charge de matiere'
+                            'nom': nom_ens, 'qualite': qualite_ens, 'priorite': 'Charge de matiere'
                         })
                         surveillants_occupes.add(nom_ens)
                         surveillants.loc[surveillants['nom'] == nom_ens, 'surveillance_attribuee'] += 1
@@ -464,11 +363,7 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
             quota_perm = st.session_state.get('nb_surv_permanent', 3)
             current_count = surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'].values[0]
             if current_count < quota_perm:
-                liste_surveillants.append({
-                    'nom': perm['nom'],
-                    'qualite': 'Permanent',
-                    'priorite': 'Permanent'
-                })
+                liste_surveillants.append({'nom': perm['nom'], 'qualite': 'Permanent', 'priorite': 'Permanent'})
                 surveillants_occupes.add(perm['nom'])
                 surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'] += 1
 
@@ -481,11 +376,7 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
             quota_vac = st.session_state.get('nb_surv_vacataire', 2)
             current_count = surveillants.loc[surveillants['nom'] == vac['nom'], 'surveillance_attribuee'].values[0]
             if current_count < quota_vac:
-                liste_surveillants.append({
-                    'nom': vac['nom'],
-                    'qualite': 'Vacataire',
-                    'priorite': 'Vacataire'
-                })
+                liste_surveillants.append({'nom': vac['nom'], 'qualite': 'Vacataire', 'priorite': 'Vacataire'})
                 surveillants_occupes.add(vac['nom'])
                 surveillants.loc[surveillants['nom'] == vac['nom'], 'surveillance_attribuee'] += 1
 
@@ -498,20 +389,13 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
             quota_aut = st.session_state.get('nb_surv_autre', 1)
             current_count = surveillants.loc[surveillants['nom'] == aut['nom'], 'surveillance_attribuee'].values[0]
             if current_count < quota_aut:
-                liste_surveillants.append({
-                    'nom': aut['nom'],
-                    'qualite': aut['qualite'],
-                    'priorite': 'Autre'
-                })
+                liste_surveillants.append({'nom': aut['nom'], 'qualite': aut['qualite'], 'priorite': 'Autre'})
                 surveillants_occupes.add(aut['nom'])
                 surveillants.loc[surveillants['nom'] == aut['nom'], 'surveillance_attribuee'] += 1
 
         attributions.append({
-            'date': date_examen,
-            'creneau': creneau_examen,
-            'matiere': matiere_examen,
-            'promotion': examen.get('promotion', ''),
-            'lieu': lieu_examen,
+            'date': date_examen, 'creneau': creneau_examen, 'matiere': matiere_examen,
+            'promotion': examen.get('promotion', ''), 'lieu': lieu_examen,
             'surveillants': [s['nom'] for s in liste_surveillants],
             'details_surveillants': liste_surveillants
         })
@@ -520,7 +404,7 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
 
 def generer_tableau_html(attributions):
     if not attributions:
-        return "<p>Aucune attribution a afficher</p>"
+        return "<p>Aucune attribution</p>"
 
     planning_par_jour = {}
     for attr in attributions:
@@ -536,17 +420,13 @@ def generer_tableau_html(attributions):
             date_val = date_val.date()
 
         date_str = date_val.strftime('%d/%m/%Y')
-        jour_semaine = date_val.strftime('%A')
-        jour_fr = JOURS_FR.get(jour_semaine, jour_semaine)
-
+        jour_fr = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
         cle = f"{jour_fr} {date_str}"
         if cle not in planning_par_jour:
             planning_par_jour[cle] = {}
-
         creneau = attr.get('creneau', '')
         if creneau not in planning_par_jour[cle]:
             planning_par_jour[cle][creneau] = []
-
         planning_par_jour[cle][creneau].append(attr)
 
     html = """
@@ -563,14 +443,13 @@ def generer_tableau_html(attributions):
     </style>
     <table class="planning-table">
     """
-
     jours = sorted(planning_par_jour.keys())
     html += "<tr><th>Creneau</th>"
     for jour in jours:
         html += f"<th>{jour}</th>"
     html += "</tr>"
 
-    for creneau in CRENEAUX_HORAIRES:
+    for creneau in CRENEAUX:
         html += f"<tr><td class='creneau-cell'>{creneau}</td>"
         for jour in jours:
             html += "<td>"
@@ -590,7 +469,6 @@ def generer_tableau_html(attributions):
                     """
             html += "</td>"
         html += "</tr>"
-
     html += "</table>"
     return html
 
@@ -608,19 +486,10 @@ def generer_excel_colore(attributions):
         else:
             date_str = str(date_val)
             jour = ''
-
-        survs = attr.get('details_surveillants', [])
-        surv_str = ", ".join([f"{s['nom']} ({s['qualite']})" for s in survs])
-
-        data.append({
-            'Date': date_str,
-            'Jour': jour,
-            'Creneau': attr.get('creneau', ''),
-            'Matiere': attr.get('matiere', ''),
-            'Promotion': attr.get('promotion', ''),
-            'Lieu': attr.get('lieu', ''),
-            'Surveillants': surv_str
-        })
+        surv_str = ", ".join([f"{s['nom']} ({s['qualite']})" for s in attr.get('details_surveillants', [])])
+        data.append({'Date': date_str, 'Jour': jour, 'Creneau': attr.get('creneau', ''),
+                     'Matiere': attr.get('matiere', ''), 'Promotion': attr.get('promotion', ''),
+                     'Lieu': attr.get('lieu', ''), 'Surveillants': surv_str})
 
     df = pd.DataFrame(data)
     header_fill = PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid")
@@ -635,12 +504,8 @@ def generer_excel_colore(attributions):
                 cell.alignment = Alignment(horizontal='center', vertical='center')
             else:
                 cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
-                cell.border = Border(
-                    left=Side(style='thin', color='90CAF9'),
-                    right=Side(style='thin', color='90CAF9'),
-                    top=Side(style='thin', color='90CAF9'),
-                    bottom=Side(style='thin', color='90CAF9')
-                )
+                cell.border = Border(left=Side(style='thin', color='90CAF9'), right=Side(style='thin', color='90CAF9'),
+                                     top=Side(style='thin', color='90CAF9'), bottom=Side(style='thin', color='90CAF9'))
 
     for col in ws.columns:
         max_length = 0
@@ -653,7 +518,6 @@ def generer_excel_colore(attributions):
                 pass
         ws.column_dimensions[column].width = min(max_length + 2, 60)
 
-    # Feuille resume
     ws2 = wb.create_sheet("Resume Enseignants")
     ens_count = {}
     for attr in attributions:
@@ -668,12 +532,8 @@ def generer_excel_colore(attributions):
 
     resume_data = []
     for nom, info in sorted(ens_count.items(), key=lambda x: x[1]['count'], reverse=True):
-        resume_data.append({
-            'Enseignant': nom,
-            'Qualite': info['qualite'],
-            'Nombre': info['count'],
-            'Examens': "; ".join(info['examens'][:5]) + ("..." if len(info['examens']) > 5 else "")
-        })
+        resume_data.append({'Enseignant': nom, 'Qualite': info['qualite'],
+                           'Nombre': info['count'], 'Examens': "; ".join(info['examens'][:5]) + ("..." if len(info['examens']) > 5 else "")})
 
     df_resume = pd.DataFrame(resume_data)
     for r_idx, row in enumerate(dataframe_to_rows(df_resume, index=False, header=True), 1):
@@ -701,24 +561,18 @@ def generer_excel_colore(attributions):
 
 def generer_pdf(attributions):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), 
-                           rightMargin=1*cm, leftMargin=1*cm, 
-                           topMargin=1*cm, bottomMargin=1*cm)
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4),
+                           rightMargin=1*cm, leftMargin=1*cm, topMargin=1*cm, bottomMargin=1*cm)
     elements = []
     styles = getSampleStyleSheet()
-
-    title_style = ParagraphStyle(
-        'CustomTitle', parent=styles['Heading1'],
-        fontSize=16, textColor=colors.HexColor('#1565C0'),
-        spaceAfter=15, alignment=1
-    )
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'],
+                                 fontSize=16, textColor=colors.HexColor('#1565C0'), spaceAfter=15, alignment=1)
 
     elements.append(Paragraph("PLANNING DES SURVEILLANCES", title_style))
     elements.append(Paragraph("Annee 2026-2027 - Semestre 1", styles['Heading2']))
     elements.append(Spacer(1, 0.3*cm))
 
     table_data = [['Date', 'Jour', 'Creneau', 'Matiere', 'Promotion', 'Lieu', 'Surveillants']]
-
     for attr in attributions:
         date_val = attr.get('date', None)
         if hasattr(date_val, 'strftime'):
@@ -727,9 +581,8 @@ def generer_pdf(attributions):
         else:
             date_str = str(date_val)
             jour = ''
-
         surv_str = ", ".join([f"{s['nom']} ({s['qualite']})" for s in attr.get('details_surveillants', [])])
-        table_data.append([date_str, jour, attr.get('creneau', ''), attr.get('matiere', ''), 
+        table_data.append([date_str, jour, attr.get('creneau', ''), attr.get('matiere', ''),
                           attr.get('promotion', ''), attr.get('lieu', ''), surv_str])
 
     table = Table(table_data, repeatRows=1)
@@ -746,28 +599,24 @@ def generer_pdf(attributions):
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#E3F2FD'), colors.HexColor('#FFFFFF')]),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
     ]))
-
     elements.append(table)
     doc.build(elements)
     buffer.seek(0)
     return buffer
 
 # ============================================================
-# INTERFACE PRINCIPALE
+# MAIN
 # ============================================================
 
 def main():
     init_session_state()
 
-    st.markdown('<div class="main-header">📋 Gestion des Surveillances d\'Examens S1 2026-2027</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">📋 Surveillances Examens S1 2026-2027</div>', unsafe_allow_html=True)
 
-    # ============================================================
-    # CHARGEMENT AUTOMATIQUE DU FICHIER SOURCE
-    # ============================================================
+    # Chargement auto
     if not st.session_state.data_loaded:
-        with st.spinner("Chargement automatique du fichier source..."):
+        with st.spinner("Chargement du fichier source..."):
             result, error = charger_fichier_source_auto()
-
             if result is not None:
                 st.session_state.enseignants_df = result['enseignants']
                 st.session_state.examens_df = result['examens']
@@ -776,153 +625,115 @@ def main():
                 st.session_state.vacataires_list = result['vacataires']
                 st.session_state.all_enseignants_list = result['all_enseignants']
                 st.session_state.data_loaded = True
-
                 if result['promotions']:
                     st.session_state.promo_selected = result['promotions'][0]
-
-                st.success(f"✅ Fichier charge: {result['sheet_used']} | {len(result['enseignants'])} enseignants | {len(result['examens'])} examens | {len(result['promotions'])} promotions")
+                st.success(f"✅ Charge: {result['sheet_used']} | {len(result['enseignants'])} ens. | {len(result['examens'])} cours | Promos: {', '.join(result['promotions'])}")
             else:
-                st.error(f"❌ Erreur chargement auto: {error}")
-                st.info("💡 Assurez-vous que le fichier 'DATA-ENS-2026-2027_surveillances.xlsx' est dans le meme dossier que l\'application.")
+                st.error(f"❌ {error}")
+                st.info("Placez le fichier dans le meme dossier que l'application.")
 
-    # ============================================================
-    # SIDEBAR - CONFIGURATION
-    # ============================================================
+    # Sidebar
     with st.sidebar:
         st.markdown("## ⚙️ Configuration")
-
-        # Informations du fichier charge
         if st.session_state.data_loaded:
-            st.markdown("### 📁 Fichier Source")
-            st.success(f"✅ {FICHIER_SOURCE} charge")
-            st.markdown(f"- **Enseignants:** {len(st.session_state.enseignants_df)}")
-            st.markdown(f"- **Examens:** {len(st.session_state.examens_df)}")
-            st.markdown(f"- **Promotions:** {', '.join(st.session_state.promotions_list) if st.session_state.promotions_list else 'N/A'}")
-
-            # Bouton recharger
-            if st.button("🔄 Recharger le fichier", key="btn_reload"):
+            st.markdown("### 📁 Source")
+            st.success(f"{FICHIER_SOURCE} charge")
+            st.markdown(f"- Enseignants: {len(st.session_state.enseignants_df)}")
+            st.markdown(f"- **Cours uniquement**: {len(st.session_state.examens_df)}")
+            st.markdown(f"- Promotions: {', '.join(st.session_state.promotions_list)}")
+            if st.button("🔄 Recharger", key="btn_reload"):
                 st.session_state.data_loaded = False
                 st.rerun()
         else:
-            st.markdown("### 📁 Fichier Source")
             st.warning("Fichier non charge")
-            fichier_upload = st.file_uploader("Ou charger manuellement", type=['xlsx', 'xls'], key="manual_upload")
-            if fichier_upload is not None:
-                # Sauvegarder temporairement
+            fu = st.file_uploader("Charger manuellement", type=['xlsx', 'xls'], key="manual_up")
+            if fu is not None:
                 with open(FICHIER_SOURCE, "wb") as f:
-                    f.write(fichier_upload.getvalue())
+                    f.write(fu.getvalue())
                 st.session_state.data_loaded = False
                 st.rerun()
 
         st.markdown("---")
-
-        # Quotas
-        st.markdown("### 📊 Quotas de Surveillance")
-        nb_perm = st.number_input("Permanent", min_value=0, max_value=20, value=st.session_state.nb_surv_permanent, key="w_quota_perm")
-        st.session_state.nb_surv_permanent = nb_perm
-
-        nb_vac = st.number_input("Vacataire", min_value=0, max_value=20, value=st.session_state.nb_surv_vacataire, key="w_quota_vac")
-        st.session_state.nb_surv_vacataire = nb_vac
-
-        nb_aut = st.number_input("Autre", min_value=0, max_value=20, value=st.session_state.nb_surv_autre, key="w_quota_aut")
-        st.session_state.nb_surv_autre = nb_aut
-
-        nb_lieu = st.number_input("Surveillants par lieu", min_value=1, max_value=5, value=st.session_state.nb_surv_par_lieu, key="w_nb_lieu")
-        st.session_state.nb_surv_par_lieu = nb_lieu
+        st.markdown("### 📊 Quotas")
+        st.session_state.nb_surv_permanent = st.number_input("Permanent", 0, 20, st.session_state.nb_surv_permanent, key="w_qp")
+        st.session_state.nb_surv_vacataire = st.number_input("Vacataire", 0, 20, st.session_state.nb_surv_vacataire, key="w_qv")
+        st.session_state.nb_surv_autre = st.number_input("Autre", 0, 20, st.session_state.nb_surv_autre, key="w_qa")
+        st.session_state.nb_surv_par_lieu = st.number_input("Surv. par lieu", 1, 5, st.session_state.nb_surv_par_lieu, key="w_nl")
 
         st.markdown("---")
-
-        # Date et jours feries
         st.markdown("### 📅 Date de Debut")
-        date_val = st.date_input("Date debut", value=st.session_state.date_debut_val, key="w_date_debut")
-        st.session_state.date_debut_val = date_val
+        st.session_state.date_debut_val = st.date_input("Date debut", st.session_state.date_debut_val, key="w_dd")
 
         st.markdown("### 🎉 Jours Feries")
-        jf_input = st.text_area("JJ/MM/AAAA separes par virgules", placeholder="11/11/2026, 25/12/2026...", key="w_jf")
-        if jf_input:
+        jf = st.text_area("JJ/MM/AAAA, separes par virgules", placeholder="11/11/2026, 25/12/2026...", key="w_jf")
+        if jf:
             try:
-                st.session_state.jours_feries = [datetime.strptime(d.strip(), "%d/%m/%Y").date() for d in jf_input.split(",") if d.strip()]
+                st.session_state.jours_feries = [datetime.strptime(d.strip(), "%d/%m/%Y").date() for d in jf.split(",") if d.strip()]
             except:
                 st.warning("Format invalide")
 
         st.markdown("---")
-        st.info("💡 Vendredi, Samedi et Dimanche exclus auto.")
+        st.info("💡 Vendredi et Samedi exclus. Dimanche est travaillable.")
 
-    # ============================================================
-    # ONGLETS
-    # ============================================================
+    # Onglets
     tabs = st.tabs(["🏠 Accueil", "👥 Enseignants", "📚 Planning par Promotion", "🎯 Attributions", "📊 Export"])
 
-    # ==================== ONGLET ACCUEIL ====================
+    # ==================== ACCUEIL ====================
     with tabs[0]:
         st.markdown("""
         <div class="info-box">
-            <h3>Application de Gestion des Surveillances d\'Examens</h3>
-            <p><strong>Semestre 1 - Annee 2026-2027</strong></p>
+            <h3>Gestion des Surveillances d'Examens</h3>
+            <p><strong>S1 - 2026-2027</strong> | Filtre automatique: <b>Cours uniquement</b> (exclut TD et TP)</p>
             <ul>
                 <li>📁 Chargement auto depuis <code>DATA-ENS-2026-2027_surveillances.xlsx</code></li>
-                <li>👥 Deux listes: Permanents et Vacataires</li>
-                <li>🚫 Liste d\'exclusion manuelle pour les enseignants non-surveillants</li>
-                <li>🏫 Salles (S01-S17) et Amphis (A01-A12) separes</li>
-                <li>📅 Planning par promotion avec liste deroulante</li>
-                <li>🎯 Attribution intelligente avec priorite charge de matiere</li>
-                <li>📊 Export HTML, Excel et PDF colores</li>
+                <li>📚 Uniquement les enseignements commencant par <b>Cours-</b></li>
+                <li>👥 Permanents / Vacataires separes + Exclusion manuelle</li>
+                <li>🏫 Salles (S01-S17) et Amphis (A01-A12) par promotion</li>
+                <li>📅 <b>Ordre des matieres personnalisable</b> par drag-and-drop</li>
+                <li>🎯 Attribution intelligente (charge de matiere prioritaire)</li>
+                <li>📊 Export HTML, Excel, PDF</li>
             </ul>
+            <p><small>ℹ️ Seuls Vendredi et Samedi sont exclus automatiquement. Dimanche est travaillable.</small></p>
         </div>
         """, unsafe_allow_html=True)
 
         if st.session_state.data_loaded:
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Enseignants", len(st.session_state.enseignants_df))
-            with col2:
-                st.metric("Examens", len(st.session_state.examens_df))
-            with col3:
-                st.metric("Promotions", len(st.session_state.promotions_list))
-            with col4:
-                st.metric("Permanents", len(st.session_state.permanents_list))
+            c1, c2, c3, c4 = st.columns(4)
+            with c1: st.metric("Enseignants", len(st.session_state.enseignants_df))
+            with c2: st.metric("Cours filtrés", len(st.session_state.examens_df))
+            with c3: st.metric("Promotions", len(st.session_state.promotions_list))
+            with c4: st.metric("Permanents", len(st.session_state.permanents_list))
 
-            with st.expander("👁️ Apercu des donnees chargees"):
-                st.markdown("**Enseignants (extrait):**")
-                st.dataframe(st.session_state.enseignants_df[['nom', 'qualite', 'enseignements', 'promotion']].head(10), use_container_width=True)
-                st.markdown("**Examens (extrait):**")
-                st.dataframe(st.session_state.examens_df.head(10), use_container_width=True)
+            with st.expander("👁️ Apercu des Cours extraits"):
+                st.dataframe(st.session_state.examens_df[['matiere', 'promotion', 'enseignant']].head(20), use_container_width=True, hide_index=True)
 
-    # ==================== ONGLET ENSEIGNANTS ====================
+    # ==================== ENSEIGNANTS ====================
     with tabs[1]:
         st.markdown('<div class="sub-header">Gestion des Enseignants</div>', unsafe_allow_html=True)
 
         if st.session_state.data_loaded:
             df_ens = st.session_state.enseignants_df
 
-            # --- LISTE D'EXCLUSION MANUELLE ---
-            st.markdown("### 🚫 Enseignants Exclus de la Surveillance")
-            st.markdown("<div class='warning-box'>Ces enseignants auront <b>0 surveillance</b> quel que soit leur quota.</div>", unsafe_allow_html=True)
+            # EXCLUSION MANUELLE
+            st.markdown("### 🚫 Enseignants Exclus (0 surveillance)")
+            st.markdown("<div class='warning-box'>Ces enseignants ne seront <b>JAMAIS</b> assignes a une surveillance.</div>", unsafe_allow_html=True)
 
             all_ens = st.session_state.all_enseignants_list
-            exclus = st.multiselect(
-                "Selectionner les enseignants a EXCLURE",
-                options=sorted(all_ens),
-                default=st.session_state.exclus_manuels,
-                key="w_exclus_manuels",
-                help="Ces enseignants ne seront jamais assignes a une surveillance"
-            )
+            exclus = st.multiselect("Selectionner les enseignants a EXCLURE", sorted(all_ens),
+                                    default=st.session_state.exclus_manuels, key="w_exclus",
+                                    help="0 surveillance pour ces enseignants")
             st.session_state.exclus_manuels = exclus
-
             if exclus:
-                st.error(f"❌ {len(exclus)} enseignant(s) exclu(s): {', '.join(exclus)}")
+                st.error(f"❌ Exclus: {', '.join(exclus)}")
 
             st.markdown("---")
 
-            # --- DEUX LISTES: PERMANENTS ET VACATAIRES ---
             col1, col2 = st.columns(2)
-
             with col1:
                 st.markdown("#### 👔 Permanents")
                 perm_df = df_ens[df_ens['qualite'] == 'Permanent'][['nom', 'enseignements', 'promotion']].copy()
                 perm_df['Exclu'] = perm_df['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
                 perm_df = perm_df.sort_values('Exclu', ascending=False)
-
                 st.markdown(f"<div class='card'><b>Total:</b> {len(perm_df)} | <b>Actifs:</b> {len(perm_df[perm_df['Exclu']=='✅ Non'])} | <b>Exclus:</b> {len(perm_df[perm_df['Exclu']=='❌ OUI'])}</div>", unsafe_allow_html=True)
                 st.dataframe(perm_df, use_container_width=True, hide_index=True)
 
@@ -931,112 +742,120 @@ def main():
                 vac_df = df_ens[df_ens['qualite'] == 'Vacataire'][['nom', 'enseignements', 'promotion']].copy()
                 vac_df['Exclu'] = vac_df['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
                 vac_df = vac_df.sort_values('Exclu', ascending=False)
-
                 st.markdown(f"<div class='card'><b>Total:</b> {len(vac_df)} | <b>Actifs:</b> {len(vac_df[vac_df['Exclu']=='✅ Non'])} | <b>Exclus:</b> {len(vac_df[vac_df['Exclu']=='❌ OUI'])}</div>", unsafe_allow_html=True)
                 st.dataframe(vac_df, use_container_width=True, hide_index=True)
 
-            # Resume global
             st.markdown("---")
-            st.markdown("#### 📈 Resume Global")
+            st.markdown("#### 📈 Resume")
             c1, c2, c3, c4, c5 = st.columns(5)
-            with c1:
-                st.metric("Permanents actifs", len(perm_df[perm_df['Exclu']=='✅ Non']))
-            with c2:
-                st.metric("Vacataires actifs", len(vac_df[vac_df['Exclu']=='✅ Non']))
-            with c3:
-                autres = len(df_ens[~df_ens['qualite'].isin(['Permanent', 'Vacataire'])])
-                st.metric("Autres", autres)
-            with c4:
-                st.metric("Total actifs", len(df_ens) - len(exclus))
-            with c5:
-                st.metric("Exclus", len(exclus))
+            with c1: st.metric("Perm. actifs", len(perm_df[perm_df['Exclu']=='✅ Non']))
+            with c2: st.metric("Vac. actifs", len(vac_df[vac_df['Exclu']=='✅ Non']))
+            with c3: st.metric("Autres", len(df_ens[~df_ens['qualite'].isin(['Permanent', 'Vacataire'])]))
+            with c4: st.metric("Total actifs", len(df_ens) - len(exclus))
+            with c5: st.metric("Exclus", len(exclus))
         else:
-            st.warning("⚠️ Donnees non chargees. Verifiez que le fichier source est present.")
+            st.warning("Donnees non chargees.")
 
-    # ==================== ONGLET PLANNING PAR PROMOTION ====================
+    # ==================== PLANNING PAR PROMOTION ====================
     with tabs[2]:
         st.markdown('<div class="sub-header">Planification par Promotion</div>', unsafe_allow_html=True)
 
         if st.session_state.data_loaded and st.session_state.promotions_list:
-            # --- LISTE DEROULANTE DES PROMOTIONS ---
-            promo_selected = st.selectbox(
-                "📚 Selectionner une promotion",
-                options=st.session_state.promotions_list,
-                index=0 if st.session_state.promotions_list else None,
-                key="w_promo_select"
-            )
+            promo_selected = st.selectbox("📚 Selectionner une promotion", st.session_state.promotions_list,
+                                          index=0, key="w_promo_sel")
             st.session_state.promo_selected = promo_selected
 
             if promo_selected:
-                st.markdown(f"### ⚙️ Configuration pour la promotion: **{promo_selected}**")
+                st.markdown(f"### ⚙️ Configuration: **{promo_selected}**")
 
+                # LIEUX PAR PROMOTION
                 col1, col2, col3 = st.columns(3)
-
                 with col1:
-                    st.markdown("#### 🕐 Creneaux horaires")
-                    creneaux_sel = st.multiselect(
-                        "Creneaux",
-                        options=CRENEAUX_HORAIRES,
-                        default=CRENEAUX_HORAIRES,
-                        key=f"w_creneaux_{promo_selected}"
-                    )
-
+                    st.markdown("#### 🕐 Creneaux")
+                    creneaux_sel = st.multiselect("Creneaux", CRENEAUX, default=CRENEAUX, key=f"w_cren_{promo_selected}")
                 with col2:
-                    st.markdown("#### 🏫 Salles (S01-S17)")
-                    salles_sel = st.multiselect(
-                        "Salles",
-                        options=SALLES,
-                        default=st.session_state.salles_selected,
-                        key=f"w_salles_{promo_selected}"
-                    )
-                    st.session_state.salles_selected = salles_sel
-
+                    st.markdown("#### 🏫 Salles S01-S17")
+                    salles_sel = st.multiselect("Salles", SALLES, default=['S01', 'S02', 'S03', 'S04', 'S05'],
+                                                key=f"w_sal_{promo_selected}")
                 with col3:
-                    st.markdown("#### 🎓 Amphis (A01-A12)")
-                    amphis_sel = st.multiselect(
-                        "Amphis",
-                        options=AMPHIS,
-                        default=st.session_state.amphis_selected,
-                        key=f"w_amphis_{promo_selected}"
-                    )
-                    st.session_state.amphis_selected = amphis_sel
+                    st.markdown("#### 🎓 Amphis A01-A12")
+                    amphis_sel = st.multiselect("Amphis", AMPHIS, default=['A01', 'A02', 'A03'],
+                                                key=f"w_amp_{promo_selected}")
 
-                # Combinaison des lieux selectionnes
                 lieux_sel = salles_sel + amphis_sel
+                st.session_state.lieux_par_promo[promo_selected] = lieux_sel
 
-                # Nombre d'examens pour cette promotion
                 nb_examens = len(st.session_state.examens_df[st.session_state.examens_df['promotion'].astype(str).str.strip() == str(promo_selected).strip()])
+                st.markdown(f"<div class='info-box'>📊 <b>{nb_examens}</b> cours | Lieux: <b>{len(lieux_sel)}</b> selectionnes ({', '.join(lieux_sel) if lieux_sel else 'Aucun'})</div>", unsafe_allow_html=True)
 
-                st.markdown(f"<div class='info-box'>📊 <b>{nb_examens}</b> examens trouves pour cette promotion | Lieux selectionnes: <b>{len(lieux_sel)}</b> ({', '.join(lieux_sel) if lieux_sel else 'Aucun'})</div>", unsafe_allow_html=True)
+                # === ORDRE DES MATIERES ===
+                st.markdown("---")
+                st.markdown("#### 📋 Ordre des Matieres dans le Calendrier")
+                st.markdown("<div class='info-box'>Definissez l'ordre des matieres. La matiere n°1 sera la premiere, n°2 la deuxieme, etc. Les matieres sans ordre seront placees a la fin.</div>", unsafe_allow_html=True)
+
+                promo_examens = st.session_state.examens_df[st.session_state.examens_df['promotion'].astype(str).str.strip() == str(promo_selected).strip()].copy()
+
+                if not promo_examens.empty:
+                    # Creer un dataframe editable pour l'ordre
+                    ordre_df = promo_examens[['matiere', 'enseignant']].copy()
+                    ordre_df['Ordre'] = range(1, len(ordre_df) + 1)
+
+                    # Si un ordre existe deja en session, l'appliquer
+                    if promo_selected in st.session_state.ordre_matieres:
+                        existing_ordre = st.session_state.ordre_matieres[promo_selected]
+                        ordre_map = {m: i+1 for i, m in enumerate(existing_ordre)}
+                        ordre_df['Ordre'] = ordre_df['matiere'].map(ordre_map).fillna(999).astype(int)
+
+                    ordre_df = ordre_df.sort_values('Ordre')
+
+                    edited_ordre = st.data_editor(
+                        ordre_df,
+                        column_config={
+                            "matiere": st.column_config.TextColumn("Matiere", disabled=True),
+                            "enseignant": st.column_config.TextColumn("Enseignant", disabled=True),
+                            "Ordre": st.column_config.NumberColumn("Ordre (1= premiere)", min_value=1, max_value=999, step=1)
+                        },
+                        use_container_width=True,
+                        num_rows="fixed",
+                        key=f"ordre_editor_{promo_selected}"
+                    )
+
+                    # Sauvegarder l'ordre
+                    edited_ordre = edited_ordre.sort_values('Ordre')
+                    st.session_state.ordre_matieres[promo_selected] = edited_ordre['matiere'].tolist()
+
+                    st.markdown("<div class='success-box'>✅ Ordre enregistre: " + " → ".join(edited_ordre['matiere'].tolist()[:5]) + ("..." if len(edited_ordre) > 5 else "") + "</div>", unsafe_allow_html=True)
 
                 # Bouton generation
+                st.markdown("---")
                 if st.button(f"🚀 Generer le Planning pour {promo_selected}", type="primary", key=f"btn_gen_{promo_selected}"):
                     if len(lieux_sel) == 0:
-                        st.error("❌ Veuillez selectionner au moins une salle ou un amphi.")
+                        st.error("❌ Selectionnez au moins un lieu.")
                     elif len(creneaux_sel) == 0:
-                        st.error("❌ Veuillez selectionner au moins un creneau horaire.")
+                        st.error("❌ Selectionnez au moins un creneau.")
                     else:
-                        with st.spinner(f"Generation du planning pour {promo_selected}..."):
+                        with st.spinner(f"Generation pour {promo_selected}..."):
+                            ordre = st.session_state.ordre_matieres.get(promo_selected, None)
                             planning = generer_planning_promo(
                                 st.session_state.examens_df.copy(),
                                 promo_selected,
                                 st.session_state.date_debut_val,
                                 st.session_state.jours_feries,
                                 creneaux_sel,
-                                lieux_sel
+                                lieux_sel,
+                                ordre
                             )
                             if planning is not None:
                                 st.session_state.planning_df = planning
                                 st.success(f"✅ Planning genere pour {promo_selected}!")
                             else:
-                                st.error("❌ Erreur lors de la generation.")
+                                st.error("❌ Erreur de generation.")
 
-                # Affichage du planning genere
+                # Affichage planning
                 if st.session_state.planning_df is not None:
                     st.markdown("---")
                     st.markdown(f"#### 📝 Planning de {promo_selected} (modifiable)")
 
-                    # Filtrer uniquement la promotion selectionnee pour l'affichage
                     planning_display = st.session_state.planning_df[
                         st.session_state.planning_df['promotion'].astype(str).str.strip() == str(promo_selected).strip()
                     ].copy()
@@ -1046,24 +865,22 @@ def main():
                             planning_display,
                             column_config={
                                 "date": st.column_config.DateColumn("Date", format="DD/MM/YYYY"),
-                                "creneau": st.column_config.SelectboxColumn("Creneau", options=CRENEAUX_HORAIRES),
-                                "lieu": st.column_config.SelectboxColumn("Lieu", options=LIEUX),
+                                "creneau": st.column_config.SelectboxColumn("Creneau", options=CRENEAUX),
+                                "lieu": st.column_config.SelectboxColumn("Lieu", options=SALLES + AMPHIS),
                                 "matiere": st.column_config.TextColumn("Matiere", disabled=True),
                                 "promotion": st.column_config.TextColumn("Promotion", disabled=True),
                                 "enseignant": st.column_config.TextColumn("Enseignant", disabled=True),
                             },
                             use_container_width=True,
                             num_rows="fixed",
-                            key=f"editor_{promo_selected}"
+                            key=f"plan_ed_{promo_selected}"
                         )
 
-                        # Mettre a jour le planning global avec les modifications
                         for idx in edited.index:
                             for col in ['date', 'creneau', 'lieu']:
                                 if col in edited.columns:
                                     st.session_state.planning_df.at[idx, col] = edited.at[idx, col]
 
-                        # Vue calendrier
                         st.markdown("#### 📅 Vue Calendrier")
                         cal_data = []
                         for _, row in edited.iterrows():
@@ -1071,28 +888,23 @@ def main():
                             if d is not None and not pd.isna(d):
                                 ds = d.strftime('%d/%m/%Y') if hasattr(d, 'strftime') else str(d)
                                 jr = JOURS_FR.get(d.strftime('%A'), d.strftime('%A')) if hasattr(d, 'strftime') else ''
-                                cal_data.append({
-                                    'Date': ds, 'Jour': jr,
-                                    'Creneau': row.get('creneau', ''),
-                                    'Matiere': row.get('matiere', ''),
-                                    'Lieu': row.get('lieu', ''),
-                                    'Enseignant': row.get('enseignant', '')
-                                })
+                                cal_data.append({'Date': ds, 'Jour': jr, 'Creneau': row.get('creneau', ''),
+                                                'Matiere': row.get('matiere', ''), 'Lieu': row.get('lieu', ''),
+                                                'Enseignant': row.get('enseignant', '')})
                         if cal_data:
                             st.dataframe(pd.DataFrame(cal_data), use_container_width=True, hide_index=True)
                     else:
-                        st.info("Aucun examen pour cette promotion dans le planning.")
+                        st.info("Aucun examen pour cette promotion.")
         else:
-            st.warning("⚠️ Aucune promotion detectee. Verifiez le fichier source.")
+            st.warning("Aucune promotion detectee.")
 
-    # ==================== ONGLET ATTRIBUTIONS ====================
+    # ==================== ATTRIBUTIONS ====================
     with tabs[3]:
         st.markdown('<div class="sub-header">Attribution des Surveillants</div>', unsafe_allow_html=True)
 
         if st.session_state.planning_df is not None and st.session_state.enseignants_df is not None:
-            # Info sur l'exclusion
             if st.session_state.exclus_manuels:
-                st.markdown(f"<div class='warning-box'>🚫 Enseignants exclus: {', '.join(st.session_state.exclus_manuels)}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='warning-box'>🚫 Exclus: {', '.join(st.session_state.exclus_manuels)}</div>", unsafe_allow_html=True)
 
             if st.button("🎯 Attribuer les Surveillants", type="primary", key="btn_attrib"):
                 with st.spinner("Attribution en cours..."):
@@ -1106,7 +918,7 @@ def main():
                         st.session_state.enseignants_df = ens_maj
                         st.success(f"✅ {len(attributions)} attributions effectuees!")
                     else:
-                        st.error("❌ Erreur lors de l\'attribution.")
+                        st.error("❌ Erreur.")
 
             if st.session_state.surveillance_df is not None:
                 st.markdown("---")
@@ -1117,32 +929,22 @@ def main():
                     d = attr.get('date', None)
                     ds = d.strftime('%d/%m/%Y') if hasattr(d, 'strftime') else str(d) if d else ''
                     for surv in attr.get('details_surveillants', []):
-                        attr_data.append({
-                            'Date': ds,
-                            'Creneau': attr.get('creneau', ''),
-                            'Matiere': attr.get('matiere', ''),
-                            'Promotion': attr.get('promotion', ''),
-                            'Lieu': attr.get('lieu', ''),
-                            'Surveillant': surv['nom'],
-                            'Qualite': surv['qualite'],
-                            'Role': 'Charge de matiere' if surv.get('priorite') == 'Charge de matiere' else surv['qualite']
-                        })
+                        attr_data.append({'Date': ds, 'Creneau': attr.get('creneau', ''),
+                                         'Matiere': attr.get('matiere', ''), 'Promotion': attr.get('promotion', ''),
+                                         'Lieu': attr.get('lieu', ''), 'Surveillant': surv['nom'],
+                                         'Qualite': surv['qualite'],
+                                         'Role': 'Charge de matiere' if surv.get('priorite') == 'Charge de matiere' else surv['qualite']})
 
                 if attr_data:
                     attr_df = pd.DataFrame(attr_data)
-
-                    def color_qualite(val):
-                        cmap = {'Permanent': 'background-color: #E3F2FD', 
-                                'Vacataire': 'background-color: #E8F5E9',
-                                'Autre': 'background-color: #FFF3E0'}
+                    def color_q(val):
+                        cmap = {'Permanent': 'background-color: #E3F2FD', 'Vacataire': 'background-color: #E8F5E9', 'Autre': 'background-color: #FFF3E0'}
                         return cmap.get(val, '')
+                    st.dataframe(attr_df.style.applymap(color_q, subset=['Qualite']), use_container_width=True, hide_index=True)
 
-                    st.dataframe(attr_df.style.applymap(color_qualite, subset=['Qualite']), use_container_width=True, hide_index=True)
-
-                # Verification chevauchements
+                # Chevauchements
                 st.markdown("---")
                 st.markdown("#### 🔍 Verification des Chevauchements")
-
                 chevauchements = []
                 ens_seances = {}
                 for attr in st.session_state.surveillance_df:
@@ -1169,15 +971,14 @@ def main():
                         seen[k] = True
 
                 if chevauchements:
-                    st.error(f"⚠️ {len(chevauchements)} chevauchement(s) detecte(s)!")
+                    st.error(f"⚠️ {len(chevauchements)} chevauchement(s)!")
                     st.dataframe(pd.DataFrame(chevauchements), use_container_width=True)
                 else:
-                    st.success("✅ Aucun chevauchement detecte!")
+                    st.success("✅ Aucun chevauchement!")
 
-                # Resume par enseignant
+                # Resume
                 st.markdown("---")
                 st.markdown("#### 📊 Resume par Enseignant")
-
                 resume = {}
                 for attr in st.session_state.surveillance_df:
                     for surv in attr.get('details_surveillants', []):
@@ -1187,19 +988,16 @@ def main():
                         resume[nom]['count'] += 1
 
                 if resume:
-                    resume_df = pd.DataFrame([
-                        {'Enseignant': k, 'Qualite': v['qualite'], 'Surveillances': v['count']}
-                        for k, v in sorted(resume.items(), key=lambda x: x[1]['count'], reverse=True)
-                    ])
+                    resume_df = pd.DataFrame([{'Enseignant': k, 'Qualite': v['qualite'], 'Surveillances': v['count']}
+                                             for k, v in sorted(resume.items(), key=lambda x: x[1]['count'], reverse=True)])
                     st.dataframe(resume_df, use_container_width=True, hide_index=True)
-
                     if not resume_df.empty:
                         chart_data = resume_df.groupby('Qualite')['Surveillances'].sum().reset_index()
                         st.bar_chart(chart_data.set_index('Qualite'))
         else:
-            st.warning("⚠️ Veuillez d\'abord generer le planning dans l\'onglet precedent.")
+            st.warning("Generez d'abord le planning.")
 
-    # ==================== ONGLET EXPORT ====================
+    # ==================== EXPORT ====================
     with tabs[4]:
         st.markdown('<div class="sub-header">Export des Plannings</div>', unsafe_allow_html=True)
 
@@ -1207,20 +1005,17 @@ def main():
             attributions = st.session_state.surveillance_df
 
             col1, col2, col3 = st.columns(3)
-
             with col1:
                 st.markdown("#### 📄 HTML")
                 html_content = generer_tableau_html(attributions)
                 st.download_button("⬇️ Telecharger HTML", html_content, "planning_surveillances.html", "text/html", key="dl_html")
-                with st.expander("Apercu HTML"):
+                with st.expander("Apercu"):
                     st.components.v1.html(html_content, height=600, scrolling=True)
-
             with col2:
                 st.markdown("#### 📊 Excel")
                 excel_buffer = generer_excel_colore(attributions)
-                st.download_button("⬇️ Telecharger Excel", excel_buffer, "planning_surveillances.xlsx", 
+                st.download_button("⬇️ Telecharger Excel", excel_buffer, "planning_surveillances.xlsx",
                                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_xlsx")
-
             with col3:
                 st.markdown("#### 📑 PDF")
                 pdf_buffer = generer_pdf(attributions)
@@ -1230,7 +1025,7 @@ def main():
             st.markdown("#### 🎨 Apercu du Planning Final")
             st.markdown(generer_tableau_html(attributions), unsafe_allow_html=True)
         else:
-            st.warning("⚠️ Aucune attribution a exporter. Generez d\'abord les attributions.")
+            st.warning("Aucune attribution a exporter.")
 
 if __name__ == "__main__":
     main()
