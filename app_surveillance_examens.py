@@ -724,8 +724,11 @@ def main():
 
         # Date de début
         st.markdown("### 📅 Date de Début")
-        st.session_state.date_debut = st.date_input("Date début session", value=datetime(2026, 11, 1), key="date_debut")
-
+        # Option 2 : initialise avant, puis utilise le widget sans 'value'
+    if "date_debut" not in st.session_state:
+        st.session_state.date_debut = datetime(2026, 11, 1).date()
+    date_debut = st.date_input("Date début session", key="date_debut")
+                
         # Jours fériés
         st.markdown("### 🎉 Jours Fériés")
         jours_feries_input = st.text_area("Dates (JJ/MM/AAAA, séparées par des virgules)", 
