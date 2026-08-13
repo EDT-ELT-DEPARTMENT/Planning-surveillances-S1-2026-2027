@@ -88,13 +88,11 @@ def normaliser_qualite(val):
 def est_cours(enseignement_str):
     """Verifie si l'enseignement est un Cours (exclut TD et TP)"""
     val = str(enseignement_str).strip()
-    # Accepte: Cours-xxx, COURS xxx, cours: xxx, commence par Cours
     return bool(re.match(r'^[Cc][Oo][Uu][Rr][Ss]', val))
 
 def extraire_nom_cours(enseignement_str):
     """Extrait le nom du cours apres le prefixe Cours-"""
     val = str(enseignement_str).strip()
-    # Enlever le prefixe Cours-, Cours:, Cours etc.
     nom = re.sub(r'^[Cc][Oo][Uu][Rr][Ss][ \-_:]+', '', val).strip()
     return nom if nom else val
 
@@ -172,11 +170,9 @@ def charger_fichier_source_auto():
         df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)
 
         # === FILTRER UNIQUEMENT LES COURS ===
-        # La colonne enseignements peut contenir plusieurs valeurs separees par virgule
         examens_data = []
         for _, row in df_ens.iterrows():
             raw_ens = str(row.get('enseignements', ''))
-            # Separer par virgule, point-virgule ou slash
             items = re.split(r'[,;/]+', raw_ens)
             for item in items:
                 item = item.strip()
@@ -188,16 +184,11 @@ def charger_fichier_source_auto():
                         'enseignant': str(row.get('nom', '')).strip(),
                         'qualite_ens': row.get('qualite', 'Permanent'),
                         'date': None, 'creneau': None, 'lieu': None,
-                        'ordre': 999  # Ordre par defaut
+                        'ordre': 999
                     })
 
         df_exam = pd.DataFrame(examens_data)
-
-        # Supprimer les doublons exacts
         df_exam = df_exam.drop_duplicates(subset=['matiere', 'promotion', 'enseignant']).copy()
-
-        # Si un cours apparait plusieurs fois pour la meme promotion avec des enseignants differents,
-        # on garde la premiere occurrence
         df_exam = df_exam.sort_values('enseignant').drop_duplicates(subset=['matiere', 'promotion'], keep='first').copy()
 
         df_ens['nb_surveillance'] = 0
@@ -232,11 +223,9 @@ def est_jour_travaille(date_obj, jours_feries):
     jour_semaine = date_obj.strftime("%A")
     jour_fr = JOURS_FR.get(jour_semaine, jour_semaine)
 
-    # UNIQUEMENT Vendredi et Samedi exclus
     if jour_fr in ["Vendredi", "Samedi"]:
         return False
 
-    # Jours feries
     for jf in jours_feries:
         if isinstance(jf, str):
             try:
@@ -258,7 +247,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
     if promo_df.empty:
         return None
 
-    # Appliquer l'ordre personnalise si fourni
     if ordre_matieres and promotion in ordre_matieres:
         ordre_map = {m: i for i, m in enumerate(ordre_matieres[promotion])}
         promo_df['ordre'] = promo_df['matiere'].map(ordre_map).fillna(999).astype(int)
@@ -689,7 +677,7 @@ def main():
                 <li>📚 Uniquement les enseignements commencant par <b>Cours-</b></li>
                 <li>👥 Permanents / Vacataires separes + Exclusion manuelle</li>
                 <li>🏫 Salles (S01-S17) et Amphis (A01-A12) par promotion</li>
-                <li>📅 <b>Ordre des matieres personnalisable</b> par drag-and-drop</li>
+                <li>📅 <b>Ordre des matieres personnalisable</b></li>
                 <li>🎯 Attribution intelligente (charge de matiere prioritaire)</li>
                 <li>📊 Export HTML, Excel, PDF</li>
             </ul>
@@ -700,12 +688,16 @@ def main():
         if st.session_state.data_loaded:
             c1, c2, c3, c4 = st.columns(4)
             with c1: st.metric("Enseignants", len(st.session_state.enseignants_df))
-            with c2: st.metric("Cours filtrés", len(st.session_state.examens_df))
+            with c2: st.metric("Cours filtres", len(st.session_state.examens_df))
             with c3: st.metric("Promotions", len(st.session_state.promotions_list))
             with c4: st.metric("Permanents", len(st.session_state.permanents_list))
 
             with st.expander("👁️ Apercu des Cours extraits"):
-                st.dataframe(st.session_state.examens_df[['matiere', 'promotion', 'enseignant']].head(20), use_container_width=True, hide_index=True)
+                preview_df = st.session_state.examens_df[['matiere', 'promotion', 'enseignant']].head(20)
+                if not preview_df.empty:
+                    st.dataframe(preview_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Aucun cours a afficher.")
 
     # ==================== ENSEIGNANTS ====================
     with tabs[1]:
@@ -735,7 +727,10 @@ def main():
                 perm_df['Exclu'] = perm_df['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
                 perm_df = perm_df.sort_values('Exclu', ascending=False)
                 st.markdown(f"<div class='card'><b>Total:</b> {len(perm_df)} | <b>Actifs:</b> {len(perm_df[perm_df['Exclu']=='✅ Non'])} | <b>Exclus:</b> {len(perm_df[perm_df['Exclu']=='❌ OUI'])}</div>", unsafe_allow_html=True)
-                st.dataframe(perm_df, use_container_width=True, hide_index=True)
+                if not perm_df.empty:
+                    st.dataframe(perm_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Aucun permanent.")
 
             with col2:
                 st.markdown("#### 📝 Vacataires")
@@ -743,13 +738,16 @@ def main():
                 vac_df['Exclu'] = vac_df['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
                 vac_df = vac_df.sort_values('Exclu', ascending=False)
                 st.markdown(f"<div class='card'><b>Total:</b> {len(vac_df)} | <b>Actifs:</b> {len(vac_df[vac_df['Exclu']=='✅ Non'])} | <b>Exclus:</b> {len(vac_df[vac_df['Exclu']=='❌ OUI'])}</div>", unsafe_allow_html=True)
-                st.dataframe(vac_df, use_container_width=True, hide_index=True)
+                if not vac_df.empty:
+                    st.dataframe(vac_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Aucun vacataire.")
 
             st.markdown("---")
             st.markdown("#### 📈 Resume")
             c1, c2, c3, c4, c5 = st.columns(5)
-            with c1: st.metric("Perm. actifs", len(perm_df[perm_df['Exclu']=='✅ Non']))
-            with c2: st.metric("Vac. actifs", len(vac_df[vac_df['Exclu']=='✅ Non']))
+            with c1: st.metric("Perm. actifs", len(perm_df[perm_df['Exclu']=='✅ Non']) if not perm_df.empty else 0)
+            with c2: st.metric("Vac. actifs", len(vac_df[vac_df['Exclu']=='✅ Non']) if not vac_df.empty else 0)
             with c3: st.metric("Autres", len(df_ens[~df_ens['qualite'].isin(['Permanent', 'Vacataire'])]))
             with c4: st.metric("Total actifs", len(df_ens) - len(exclus))
             with c5: st.metric("Exclus", len(exclus))
@@ -796,11 +794,9 @@ def main():
                 promo_examens = st.session_state.examens_df[st.session_state.examens_df['promotion'].astype(str).str.strip() == str(promo_selected).strip()].copy()
 
                 if not promo_examens.empty:
-                    # Creer un dataframe editable pour l'ordre
                     ordre_df = promo_examens[['matiere', 'enseignant']].copy()
                     ordre_df['Ordre'] = range(1, len(ordre_df) + 1)
 
-                    # Si un ordre existe deja en session, l'appliquer
                     if promo_selected in st.session_state.ordre_matieres:
                         existing_ordre = st.session_state.ordre_matieres[promo_selected]
                         ordre_map = {m: i+1 for i, m in enumerate(existing_ordre)}
@@ -820,7 +816,6 @@ def main():
                         key=f"ordre_editor_{promo_selected}"
                     )
 
-                    # Sauvegarder l'ordre
                     edited_ordre = edited_ordre.sort_values('Ordre')
                     st.session_state.ordre_matieres[promo_selected] = edited_ordre['matiere'].tolist()
 
@@ -937,10 +932,20 @@ def main():
 
                 if attr_data:
                     attr_df = pd.DataFrame(attr_data)
+                    # CORRECTION: utiliser map au lieu de applymap (pandas 2.1+)
                     def color_q(val):
                         cmap = {'Permanent': 'background-color: #E3F2FD', 'Vacataire': 'background-color: #E8F5E9', 'Autre': 'background-color: #FFF3E0'}
                         return cmap.get(val, '')
-                    st.dataframe(attr_df.style.applymap(color_q, subset=['Qualite']), use_container_width=True, hide_index=True)
+
+                    try:
+                        styled = attr_df.style.map(color_q, subset=['Qualite'])
+                    except AttributeError:
+                        # Fallback pour anciennes versions
+                        styled = attr_df.style.applymap(color_q, subset=['Qualite'])
+
+                    st.dataframe(styled, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Aucune attribution a afficher.")
 
                 # Chevauchements
                 st.markdown("---")
@@ -972,7 +977,7 @@ def main():
 
                 if chevauchements:
                     st.error(f"⚠️ {len(chevauchements)} chevauchement(s)!")
-                    st.dataframe(pd.DataFrame(chevauchements), use_container_width=True)
+                    st.dataframe(pd.DataFrame(chevauchements), use_container_width=True, hide_index=True)
                 else:
                     st.success("✅ Aucun chevauchement!")
 
