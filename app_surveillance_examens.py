@@ -730,20 +730,23 @@ def main():
     date_debut = st.date_input("Date début session", key="date_debut")
                 
         # Jours fériés
-        st.markdown("### 🎉 Jours Fériés")
+
+    if condition:
+        st.markdown("### 🎉 Jours Fériés")          
+
         jours_feries_input = st.text_area("Dates (JJ/MM/AAAA, séparées par des virgules)", 
                                           placeholder="11/11/2026, 25/12/2026...", key="jours_feries_str")
-        if jours_feries_input:
-            try:
-                st.session_state.jours_feries = [
-                    datetime.strptime(d.strip(), "%d/%m/%Y").date() 
-                    for d in jours_feries_input.split(",") if d.strip()
-                ]
-            except:
-                st.warning("Format invalide. Utilisez JJ/MM/AAAA")
+    if jours_feries_input:
+        try:
+            st.session_state.jours_feries = [
+                datetime.strptime(d.strip(), "%d/%m/%Y").date() 
+                for d in jours_feries_input.split(",") if d.strip()
+            ]
+        except:
+            st.warning("Format invalide. Utilisez JJ/MM/AAAA")
 
-        st.markdown("---")
-        st.info("💡 Les vendredis et samedis sont exclus automatiquement.")
+            st.markdown("---")
+            st.info("💡 Les vendredis et samedis sont exclus automatiquement.")
 
     # Onglets principaux
     tabs = st.tabs(["🏠 Accueil", "👥 Enseignants", "📚 Examens & Planning", "🎯 Attributions", "📊 Export"])
