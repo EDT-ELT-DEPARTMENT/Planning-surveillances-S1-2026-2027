@@ -687,9 +687,8 @@ def generer_pdf(attributions, filename="planning_surveillances.pdf"):
 
 def main():
     init_session_state()
-
-    st.markdown('<div class="main-header">📋 Gestion des Surveillances d'Examens 2026-2027</div>', unsafe_allow_html=True)
-
+    st.markdown('📋 Gestion des Surveillances d\'Examens 2026-2027', unsafe_allow_html=True)
+    
     # Sidebar - Configuration
     with st.sidebar:
         st.markdown("## ⚙️ Configuration")
