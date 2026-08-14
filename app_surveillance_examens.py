@@ -201,9 +201,12 @@ def est_jour_travaille(date_obj, jours_feries):
 def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_jour, jours_feries, creneaux, lieux, ordre_matieres=None, horaires_matiere=None, jours_matiere=None):
     if examens_df is None or examens_df.empty:
         return None
-    promo_df = examens_df[examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()].copy()
+    
+    # Travaillez sur une copie pour éviter des modifications non désirées sur le DataFrame global en cours de route
+    df_working = examens_df.copy()
+    promo_df = df_working[df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()].copy()
     if promo_df.empty:
-        return None
+        return examens_df
     
     if ordre_matieres and promotion in ordre_matieres:
         ordre_map = {m: i for i, m in enumerate(ordre_matieres[promotion])}
@@ -271,17 +274,17 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
         examens_par_jour_count[date_examen] = examens_par_jour_count.get(date_examen, 0) + 1
         lieu = lieux[lieu_idx % nb_lieux]
         
-        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'date'] = date_examen
-        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Horaire'] = creneau
-        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Jours'] = JOURS_FR.get(date_examen.strftime("%A"), date_examen.strftime("%A"))
-        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Lieu'] = lieu
+        # Mise à jour directe dans le DataFrame de travail
+        df_working.loc[(df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (df_working['Enseignements'] == matiere_nom), 'date'] = date_examen
+        df_working.loc[(df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (df_working['Enseignements'] == matiere_nom), 'Horaire'] = creneau
+        df_working.loc[(df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (df_working['Enseignements'] == matiere_nom), 'Jours'] = JOURS_FR.get(date_examen.strftime("%A"), date_examen.strftime("%A"))
+        df_working.loc[(df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (df_working['Enseignements'] == matiere_nom), 'Lieu'] = lieu
         
         lieu_idx += 1
         if not d_ex:
             date_courante = date_examen
             
-    planning_promo_result = examens_df[examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()].sort_values(by=['date', 'Horaire', 'Lieu'])
-    return planning_promo_result
+    return df_working
 
 def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
     if planning_df is None or enseignants_df is None:
@@ -968,16 +971,21 @@ def main():
                         total_promos = len(st.session_state.promotions_list)
                         generated_count = 0
                         
+                        # Initialisation globale du planning à partir des examens si nécessaire
+                        if st.session_state.planning_df is None:
+                            st.session_state.planning_df = st.session_state.examens_df.copy()
+                            
                         for i, p_item in enumerate(st.session_state.promotions_list):
-                            time.sleep(0.1)
+                            time.sleep(0.05)
                             ordre = st.session_state.ordre_matieres.get(p_item, None)
                             horaires = st.session_state.horaires_par_matiere.get(p_item, None)
                             jours_m = st.session_state.jours_par_matiere.get(p_item, None)
                             
-                            if st.session_state.planning_df is None:
-                                st.session_state.planning_df = st.session_state.examens_df.copy()
-                                
-                            planning_promo = generer_planning_promo(
+                            # Récupération des lieux spécifiques ou défaut pour chaque promo
+                            lieux_p = st.session_state.lieux_par_promo.get(p_item, lieux_sel)
+                            
+                            # Génération de l'EDT global cumulatif sans écraser les autres promotions
+                            df_updated = generer_planning_promo(
                                 st.session_state.planning_df, 
                                 p_item, 
                                 st.session_state.date_debut_val, 
@@ -985,20 +993,21 @@ def main():
                                 st.session_state.nb_par_jour, 
                                 st.session_state.jours_feries, 
                                 CRENEAUX_DEFAUT, 
-                                lieux_sel, 
+                                lieux_p, 
                                 ordre, 
                                 horaires, 
                                 jours_m
                             )
-                            if planning_promo is not None:
-                                st.session_state.planning_df = planning_promo
-                                st.session_state.historique_edt[p_item] = planning_promo[planning_promo['Promotion'].astype(str).str.strip() == str(p_item).strip()].to_dict('records')
+                            if df_updated is not None:
+                                st.session_state.planning_df = df_updated
+                                promo_subset = df_updated[df_updated['Promotion'].astype(str).str.strip() == str(p_item).strip()]
+                                st.session_state.historique_edt[p_item] = promo_subset.to_dict('records')
                             
                             generated_count += 1
                             progress_bar.progress(generated_count / total_promos)
                             status_text.text(f"Progression : {generated_count} / {total_promos} promotions générées")
                             
-                        st.success(f"✅ Génération effectuée avec succès !")
+                        st.success(f"✅ Génération effectuée avec succès pour toutes les promotions !")
 
                 if st.session_state.planning_df is not None:
                     st.markdown("---")
