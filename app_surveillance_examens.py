@@ -237,7 +237,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
             else:
                 date_examen = date_pref
         else:
-            # Si aucune date personnalisée, on suit l'ancienne logique incrémentielle
             while not est_jour_travaille(date_courante, jours_feries):
                 date_courante += timedelta(days=1)
             date_examen = date_courante
@@ -247,17 +246,11 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
         if creneau_pref:
             creneau = creneau_pref
         else:
-            # Nouvelle logique : attribution séquentielle des créneaux disponibles de la journée
             creneau = creneaux_dispo[creneau_idx % nb_creneaux]
             creneau_idx += 1
             if creneau_idx % nb_creneaux == 0:
-                # Si on a épuisé les créneaux du jour, on passe au jour suivant pour les matières automatiques
                 if not date_pref:
                     date_courante += timedelta(days=1)
-        
-        # Si la date n'était pas figée et qu'on avance par créneau, on s'assure d'avancer proprement le jour si on boucle
-        if not date_pref and creneau_idx > 0 and creneau_idx % nb_creneaux == 0:
-            pass # date_courante a déjà été incrémentée ou gérée
 
         lieu = lieux[lieu_idx % nb_lieux]
         
@@ -881,10 +874,9 @@ def main():
             promo_selected = st.selectbox("📚 Sélectionner une promotion", st.session_state.promotions_list, index=0, key="w_promo_sel")
             st.session_state.promo_selected = promo_selected
             if promo_selected:
-                col1, col2, col3 = st.columns(3)
-                with col1: creneaux_sel = st.multiselect("Créneaux disponibles", CRENEAUX, default=CRENEAUX, key=f"w_cren_{promo_selected}")
-                with col2: salles_sel = st.multiselect("Salles", SALLES, default=['S01', 'S02', 'S03', 'S04', 'S05'], key=f"w_sal_{promo_selected}")
-                with col3: amphis_sel = st.multiselect("Amphis", AMPHIS, default=['A01', 'A02', 'A03'], key=f"w_amp_{promo_selected}")
+                col1, col2 = st.columns(2)
+                with col1: salles_sel = st.multiselect("Salles", SALLES, default=['S01', 'S02', 'S03', 'S04', 'S05'], key=f"w_sal_{promo_selected}")
+                with col2: amphis_sel = st.multiselect("Amphis", AMPHIS, default=['A01', 'A02', 'A03'], key=f"w_amp_{promo_selected}")
                 lieux_sel = salles_sel + amphis_sel
                 st.session_state.lieux_par_promo[promo_selected] = lieux_sel
                 
@@ -912,7 +904,7 @@ def main():
                                 if promo_selected in st.session_state.jours_par_matiere and m_nom in st.session_state.jours_par_matiere[promo_selected]:
                                     del st.session_state.jours_par_matiere[promo_selected][m_nom]
                         with col_m3:
-                            h_choisi = st.selectbox(f"Horaire - {m_nom}", ["Automatique (Multi-créneaux)"] + creneaux_sel, key=f"h_{promo_selected}_{m_nom}")
+                            h_choisi = st.selectbox(f"Horaire - {m_nom}", ["Automatique (Multi-créneaux)"] + CRENEAUX, key=f"h_{promo_selected}_{m_nom}")
                             if h_choisi != "Automatique (Multi-créneaux)":
                                 st.session_state.horaires_par_matiere.setdefault(promo_selected, {})[m_nom] = h_choisi
                             else:
@@ -921,7 +913,6 @@ def main():
                                 
                 if st.button(f"🚀 Générer l'EDT pour {promo_selected}", type="primary", key=f"btn_gen_{promo_selected}"):
                     if len(lieux_sel) == 0: st.error("❌ Sélectionnez au moins un lieu.")
-                    elif len(creneaux_sel) == 0: st.error("❌ Sélectionnez au moins un créneau.")
                     else:
                         progress_bar = st.progress(0)
                         status_text = st.empty()
@@ -938,7 +929,7 @@ def main():
                             if st.session_state.planning_df is None:
                                 st.session_state.planning_df = st.session_state.examens_df.copy()
                                 
-                            planning_promo = generer_planning_promo(st.session_state.planning_df, p_item, st.session_state.date_debut_val, st.session_state.jours_feries, creneaux_sel, lieux_sel, ordre, horaires, jours_m)
+                            planning_promo = generer_planning_promo(st.session_state.planning_df, p_item, st.session_state.date_debut_val, st.session_state.jours_feries, CRENEAUX, lieux_sel, ordre, horaires, jours_m)
                             if planning_promo is not None:
                                 st.session_state.planning_df = planning_promo
                                 st.session_state.historique_edt[p_item] = planning_promo[planning_promo['Promotion'].astype(str).str.strip() == str(p_item).strip()].to_dict('records')
