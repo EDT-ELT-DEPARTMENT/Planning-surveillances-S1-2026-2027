@@ -224,11 +224,12 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
         return None
         
     lieu_idx = 0
+    creneau_idx = 0
     
     for i in promo_df.index:
         matiere_nom = promo_df.at[i, 'Enseignements']
         
-        # Application stricte de la date personnalisée si elle existe pour cette matière
+        # 1. Date fixée manuellement par l'utilisateur pour cette matière
         date_pref = jours_matiere.get(promotion, {}).get(matiere_nom) if jours_matiere else None
         if date_pref:
             if isinstance(date_pref, datetime):
@@ -236,15 +237,28 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
             else:
                 date_examen = date_pref
         else:
+            # Si aucune date personnalisée, on suit l'ancienne logique incrémentielle
             while not est_jour_travaille(date_courante, jours_feries):
                 date_courante += timedelta(days=1)
             date_examen = date_courante
-            date_courante += timedelta(days=1)
             
+        # 2. Horaire strict par matière ou répartition automatique multi-créneaux par jour
         creneau_pref = horaires_matiere.get(promotion, {}).get(matiere_nom) if horaires_matiere else None
-        # Modification ici : utilisation directe du créneau sélectionné sans mention de terme par défaut
-        creneau = creneau_pref if creneau_pref else creneaux_dispo[0]
+        if creneau_pref:
+            creneau = creneau_pref
+        else:
+            # Nouvelle logique : attribution séquentielle des créneaux disponibles de la journée
+            creneau = creneaux_dispo[creneau_idx % nb_creneaux]
+            creneau_idx += 1
+            if creneau_idx % nb_creneaux == 0:
+                # Si on a épuisé les créneaux du jour, on passe au jour suivant pour les matières automatiques
+                if not date_pref:
+                    date_courante += timedelta(days=1)
         
+        # Si la date n'était pas figée et qu'on avance par créneau, on s'assure d'avancer proprement le jour si on boucle
+        if not date_pref and creneau_idx > 0 and creneau_idx % nb_creneaux == 0:
+            pass # date_courante a déjà été incrémentée ou gérée
+
         lieu = lieux[lieu_idx % nb_lieux]
         
         examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'date'] = date_examen
@@ -825,7 +839,7 @@ def main():
                 <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
-                <li>🕐 <b>Choix de la date fixe et de l'horaire précis par matière</b> (prise en compte prioritaire et exacte)</li>
+                <li>🕐 <b>Nouvelle logique multi-créneaux par jour</b> : plusieurs examens peuvent s'enchaîner le même jour sur des créneaux horaires différents.</li>
                 <li>🎉 <b>Sélection des jours fériés depuis le calendrier interactif</b></li>
             </ul>
         </div>
@@ -852,7 +866,7 @@ def main():
         else: st.warning("Données non chargées.")
 
     with tabs[2]:
-        st.markdown('<div class="sub-header">Planification par Promotion (Génération avec Barre de Progression)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">Planification par Promotion (Multi-créneaux par jour)</div>', unsafe_allow_html=True)
         
         col_h1, col_h2 = st.columns([1, 4])
         with col_h1:
@@ -874,7 +888,7 @@ def main():
                 lieux_sel = salles_sel + amphis_sel
                 st.session_state.lieux_par_promo[promo_selected] = lieux_sel
                 
-                st.markdown("#### 🕒 Personnalisation de la Date fixe et de l'Horaire strict par Matière (Priorité Dominante)")
+                st.markdown("#### 🕒 Personnalisation de la Date et de l'Horaire par Matière")
                 df_promo_matieres = st.session_state.examens_df[st.session_state.examens_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()]
                 
                 if not df_promo_matieres.empty:
@@ -898,10 +912,12 @@ def main():
                                 if promo_selected in st.session_state.jours_par_matiere and m_nom in st.session_state.jours_par_matiere[promo_selected]:
                                     del st.session_state.jours_par_matiere[promo_selected][m_nom]
                         with col_m3:
-                            # Modification ici : Suppression de la mention "Par défaut" dans la liste déroulante des horaires par matière
-                            h_choisi = st.selectbox(f"Horaire - {m_nom}", creneaux_sel, key=f"h_{promo_selected}_{m_nom}")
-                            if h_choisi:
+                            h_choisi = st.selectbox(f"Horaire - {m_nom}", ["Automatique (Multi-créneaux)"] + creneaux_sel, key=f"h_{promo_selected}_{m_nom}")
+                            if h_choisi != "Automatique (Multi-créneaux)":
                                 st.session_state.horaires_par_matiere.setdefault(promo_selected, {})[m_nom] = h_choisi
+                            else:
+                                if promo_selected in st.session_state.horaires_par_matiere and m_nom in st.session_state.horaires_par_matiere[promo_selected]:
+                                    del st.session_state.horaires_par_matiere[promo_selected][m_nom]
                                 
                 if st.button(f"🚀 Générer l'EDT pour {promo_selected}", type="primary", key=f"btn_gen_{promo_selected}"):
                     if len(lieux_sel) == 0: st.error("❌ Sélectionnez au moins un lieu.")
@@ -931,7 +947,7 @@ def main():
                             progress_bar.progress(generated_count / total_promos)
                             status_text.text(f"Progression : {generated_count} / {total_promos} promotions générées")
                             
-                        st.success(f"✅ Génération de tous les emplois du temps effectuée avec succès !")
+                        st.success(f"✅ Génération multi-créneaux de tous les emplois du temps effectuée avec succès !")
 
                 if st.session_state.planning_df is not None:
                     st.markdown("---")
