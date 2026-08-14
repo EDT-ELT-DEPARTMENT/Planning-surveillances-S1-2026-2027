@@ -242,7 +242,8 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
             date_courante += timedelta(days=1)
             
         creneau_pref = horaires_matiere.get(promotion, {}).get(matiere_nom) if horaires_matiere else None
-        creneau = creneau_pref if creneau_pref and creneau_pref != "Par défaut" else creneaux_dispo[0]
+        # Modification ici : utilisation directe du créneau sélectionné sans mention de terme par défaut
+        creneau = creneau_pref if creneau_pref else creneaux_dispo[0]
         
         lieu = lieux[lieu_idx % nb_lieux]
         
@@ -897,11 +898,10 @@ def main():
                                 if promo_selected in st.session_state.jours_par_matiere and m_nom in st.session_state.jours_par_matiere[promo_selected]:
                                     del st.session_state.jours_par_matiere[promo_selected][m_nom]
                         with col_m3:
-                            h_choisi = st.selectbox(f"Horaire - {m_nom}", ["Par défaut"] + creneaux_sel, key=f"h_{promo_selected}_{m_nom}")
-                            if h_choisi != "Par défaut":
+                            # Modification ici : Suppression de la mention "Par défaut" dans la liste déroulante des horaires par matière
+                            h_choisi = st.selectbox(f"Horaire - {m_nom}", creneaux_sel, key=f"h_{promo_selected}_{m_nom}")
+                            if h_choisi:
                                 st.session_state.horaires_par_matiere.setdefault(promo_selected, {})[m_nom] = h_choisi
-                            elif m_nom in st.session_state.horaires_par_matiere.get(promo_selected, {}):
-                                del st.session_state.horaires_par_matiere[promo_selected][m_nom]
                                 
                 if st.button(f"🚀 Générer l'EDT pour {promo_selected}", type="primary", key=f"btn_gen_{promo_selected}"):
                     if len(lieux_sel) == 0: st.error("❌ Sélectionnez au moins un lieu.")
