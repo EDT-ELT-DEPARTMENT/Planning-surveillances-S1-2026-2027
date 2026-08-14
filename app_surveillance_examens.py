@@ -73,7 +73,7 @@ def extraire_nom_cours(item_str):
     """Extrait et nettoie le nom du cours en supprimant le préfixe 'Cours-' ou similaire."""
     item_str = str(item_str).strip()
     # Supprime un préfixe éventuel du type 'Cours-', 'Cours : ', etc.
-    item_ nettoyé = re.sub(r'^(cours[\s\-\:]*)', '', item_str, flags=re.IGNORECASE)
+    item_nettoyé = re.sub(r'^(cours[\s\-\:]*)', '', item_str, flags=re.IGNORECASE)
     return item_nettoyé.strip() if item_nettoyé else item_str
 
 def charger_fichier_source_auto():
