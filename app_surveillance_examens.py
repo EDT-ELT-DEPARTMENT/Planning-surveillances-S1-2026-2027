@@ -15,7 +15,7 @@ import os
 import re
 import time
 
-# Titre officiel rappelé conformément aux consignes[cite: 2]
+# Titre officiel rappelé conformément aux consignes
 TITRE_PLATEFORME = "Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA"
 
 st.set_page_config(page_title=TITRE_PLATEFORME, page_icon="📋", layout="wide", initial_sidebar_state="expanded")
@@ -229,7 +229,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
     for i in promo_df.index:
         matiere_nom = promo_df.at[i, 'Enseignements']
         
-        # 1. Date fixée manuellement par l'utilisateur pour cette matière
         date_pref = jours_matiere.get(promotion, {}).get(matiere_nom) if jours_matiere else None
         if date_pref:
             if isinstance(date_pref, datetime):
@@ -241,7 +240,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
                 date_courante += timedelta(days=1)
             date_examen = date_courante
             
-        # 2. Horaire strict par matière ou répartition automatique multi-créneaux par jour
         creneau_pref = horaires_matiere.get(promotion, {}).get(matiere_nom) if horaires_matiere else None
         if creneau_pref:
             creneau = creneau_pref
@@ -832,7 +830,7 @@ def main():
                 <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
-                <li>🕐 <b>Nouvelle logique multi-créneaux par jour</b> : plusieurs examens peuvent s'enchaîner le même jour sur des créneaux horaires différents.</li>
+                <li>🕐 <b>Logique multi-créneaux par jour</b> : plusieurs examens peuvent s'enchaîner le même jour sur des créneaux horaires différents.</li>
                 <li>🎉 <b>Sélection des jours fériés depuis le calendrier interactif</b></li>
             </ul>
         </div>
@@ -898,13 +896,20 @@ def main():
                             date_actuelle = st.session_state.jours_par_matiere.get(promo_selected, {}).get(m_nom, None)
                             activer_date_fixe = st.checkbox(f"Date fixe - {m_nom}", value=(date_actuelle is not None), key=f"chk_date_{promo_selected}_{m_nom}")
                             if activer_date_fixe:
-                                d_choisie = st.date_input(f"Date - {m_nom}", value=date_actuelle if isinstance(date_actuelle, date) else st.session_state.date_debut_val, key=f"d_choisie_{promo_selected}_{m_nom}")
+                                d_val = date_actuelle if isinstance(date_actuelle, date) else st.session_state.date_debut_val
+                                d_choisie = st.date_input(f"Date - {m_nom}", value=d_val, key=f"d_choisie_{promo_selected}_{m_nom}")
                                 st.session_state.jours_par_matiere.setdefault(promo_selected, {})[m_nom] = d_choisie
                             else:
                                 if promo_selected in st.session_state.jours_par_matiere and m_nom in st.session_state.jours_par_matiere[promo_selected]:
                                     del st.session_state.jours_par_matiere[promo_selected][m_nom]
                         with col_m3:
-                            h_choisi = st.selectbox(f"Horaire - {m_nom}", ["Automatique (Multi-créneaux)"] + CRENEAUX, key=f"h_{promo_selected}_{m_nom}")
+                            options_h = ["Automatique (Multi-créneaux)"] + CRENEAUX
+                            horaire_actuel = st.session_state.horaires_par_matiere.get(promo_selected, {}).get(m_nom, "Automatique (Multi-créneaux)")
+                            try:
+                                idx_h = options_h.index(horaire_actuel)
+                            except:
+                                idx_h = 0
+                            h_choisi = st.selectbox(f"Horaire - {m_nom}", options_h, index=idx_h, key=f"h_{promo_selected}_{m_nom}")
                             if h_choisi != "Automatique (Multi-créneaux)":
                                 st.session_state.horaires_par_matiere.setdefault(promo_selected, {})[m_nom] = h_choisi
                             else:
