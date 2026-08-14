@@ -1,52 +1,3 @@
-import streamlit as st
-import pandas as pd
-
-# Titre officiel de l'application
-st.title("Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA")
-
-# Listes de référence
-jours_possibles = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"]
-horaires_possibles = ["8h - 9h30", "9h30 - 11h", "11h - 12h30", "12h30 - 14h00", "14h00 - 15h30"]
-
-# Correction : default=[] pour éviter toute sélection multiple automatique par défaut
-st.subheader("Paramétrage de la génération manuelle")
-choix_jours = st.multiselect(
-    "Sélectionner le(s) jour(s) spécifique(s) :", 
-    options=jours_possibles, 
-    default=[]
-)
-
-choix_horaires = st.multiselect(
-    "Sélectionner le(s) créneau(x) horaire(s) spécifique(s) :", 
-    options=horaires_possibles, 
-    default=[]
-)
-
-# Bouton de validation de la génération
-if st.button("Lancer la génération manuelle par date et horaire"):
-    # Blocage strict si aucun créneau n'est explicitement sélectionné par l'utilisateur
-    if not choix_jours or not choix_horaires:
-        st.error("Erreur : Aucun créneau ou jour n'a été sélectionné. Veuillez effectuer une sélection manuelle valide pour éviter toute répartition par défaut.")
-    else:
-        # Simulation d'un DataFrame source (remplacer par votre df_source réel)
-        # Disposition requise : Enseignements, Code, Enseignants, Horaire, Jours, Lieu, Promotion
-        if 'df_source' in locals() and not df_source.empty:
-            data_generees = []
-            
-            for _, row in df_source.iterrows():
-                # Application stricte limitée aux UNIQUES choix de l'utilisateur
-                for j in choix_jours:
-                    for h in choix_horaires:
-                        nouvelle_ligne = row.copy()
-                        nouvelle_ligne['Jours'] = j
-                        nouvelle_ligne['Horaire'] = h
-                        data_generees.append(nouvelle_ligne)
-            
-            df_final = pd.DataFrame(data_generees)
-            st.success("Génération manuelle appliquée avec succès, respectant strictement les créneaux choisis.")
-            st.dataframe(df_final)
-        else:
-            st.warning("Le tableau source est vide ou non défini.")
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import streamlit as st
 import pandas as pd
@@ -64,7 +15,7 @@ import os
 import re
 import time
 
-# Titre officiel rappelé conformément aux consignes[cite: 5]
+# Titre officiel rappelé conformément aux consignes
 TITRE_PLATEFORME = "Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA"
 
 st.set_page_config(page_title=TITRE_PLATEFORME, page_icon="📋", layout="wide", initial_sidebar_state="expanded")
@@ -946,55 +897,6 @@ def main():
                 lieux_sel = salles_sel + amphis_sel
                 st.session_state.lieux_par_promo[promo_selected] = lieux_sel
                 
-                import streamlit as st
-import pandas as pd
-
-# Titre officiel de l'application
-st.title("Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA")
-
-# Listes de référence
-jours_possibles = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"]
-horaires_possibles = ["8h - 9h30", "9h30 - 11h", "11h - 12h30", "12h30 - 14h00", "14h00 - 15h30"]
-
-# Correction : default=[] pour éviter toute sélection multiple automatique par défaut
-st.subheader("Paramétrage de la génération manuelle")
-choix_jours = st.multiselect(
-    "Sélectionner le(s) jour(s) spécifique(s) :", 
-    options=jours_possibles, 
-    default=[]
-)
-
-choix_horaires = st.multiselect(
-    "Sélectionner le(s) créneau(x) horaire(s) spécifique(s) :", 
-    options=horaires_possibles, 
-    default=[]
-)
-
-# Bouton de validation de la génération
-if st.button("Lancer la génération manuelle par date et horaire"):
-    # Blocage strict si aucun créneau n'est explicitement sélectionné par l'utilisateur
-    if not choix_jours or not choix_horaires:
-        st.error("Erreur : Aucun créneau ou jour n'a été sélectionné. Veuillez effectuer une sélection manuelle valide pour éviter toute répartition par défaut.")
-    else:
-        # Simulation d'un DataFrame source (remplacer par votre df_source réel)
-        # Disposition requise : Enseignements, Code, Enseignants, Horaire, Jours, Lieu, Promotion
-        if 'df_source' in locals() and not df_source.empty:
-            data_generees = []
-            
-            for _, row in df_source.iterrows():
-                # Application stricte limitée aux UNIQUES choix de l'utilisateur
-                for j in choix_jours:
-                    for h in choix_horaires:
-                        nouvelle_ligne = row.copy()
-                        nouvelle_ligne['Jours'] = j
-                        nouvelle_ligne['Horaire'] = h
-                        data_generees.append(nouvelle_ligne)
-            
-            df_final = pd.DataFrame(data_generees)
-            st.success("Génération manuelle appliquée avec succès, respectant strictement les créneaux choisis.")
-            st.dataframe(df_final)
-        else:
-            st.warning("Le tableau source est vide ou non défini.")
                 st.markdown("#### 🕒 Personnalisation de la Date et de l'Horaire par Matière")
                 df_promo_matieres = st.session_state.examens_df[st.session_state.examens_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()]
                 
