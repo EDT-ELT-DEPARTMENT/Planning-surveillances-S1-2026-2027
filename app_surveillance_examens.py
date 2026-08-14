@@ -129,7 +129,7 @@ def charger_fichier_source_auto():
                     if len(sample) > 0 and sample.str.len().mean() > 3:
                         df_ens['nom'] = df_ens[col]
                         break
-        for col in ['qualite', 'Enseignements', 'Promotion']:
+        for col in ['nom', 'qualite', 'Enseignements', 'Promotion']:
             if col not in df_ens.columns:
                 df_ens[col] = ''
         df_ens = df_ens[df_ens['nom'].notna() & (df_ens['nom'].astype(str).str.strip() != '')].copy()
@@ -896,6 +896,9 @@ def main():
             exclus = st.multiselect("Sélectionner les enseignants à EXCLURE", sorted(all_ens), default=st.session_state.exclus_manuels, key="w_exclus")
             st.session_state.exclus_manuels = exclus
             if not df_ens.empty:
+                for col_req in ['nom', 'qualite', 'Enseignements', 'Promotion']:
+                    if col_req not in df_ens.columns:
+                        df_ens[col_req] = ''
                 disp_ens = df_ens[['nom', 'qualite', 'Enseignements', 'Promotion']].copy()
                 disp_ens['Exclu'] = disp_ens['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
                 disp_ens = disp_ens.sort_values(by=['qualite', 'nom'], ascending=[True, True])
