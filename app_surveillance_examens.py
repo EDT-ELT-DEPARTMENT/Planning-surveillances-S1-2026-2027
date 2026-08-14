@@ -966,48 +966,35 @@ def main():
                                     del st.session_state.horaires_par_matiere[promo_selected][m_nom]
                                 
                 if st.button(f"🚀 Générer l'EDT pour {promo_selected}", type="primary", key=f"btn_gen_{promo_selected}"):
-                    if len(lieux_sel) == 0: st.error("❌ Sélectionnez au moins un lieu.")
+                    if len(lieux_sel) == 0: 
+                        st.error("❌ Sélectionnez au moins un lieu.")
                     else:
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-                        
-                        total_promos = len(st.session_state.promotions_list)
-                        generated_count = 0
-                        
                         if st.session_state.planning_df is None:
                             st.session_state.planning_df = st.session_state.examens_df.copy()
                             
-                        for i, p_item in enumerate(st.session_state.promotions_list):
-                            time.sleep(0.05)
-                            ordre = st.session_state.ordre_matieres.get(p_item, None)
-                            horaires = st.session_state.horaires_par_matiere.get(p_item, None)
-                            jours_m = st.session_state.jours_par_matiere.get(p_item, None)
-                            
-                            lieux_p = st.session_state.lieux_par_promo.get(p_item, lieux_sel)
-                            
-                            df_updated = generer_planning_promo(
-                                st.session_state.planning_df, 
-                                p_item, 
-                                st.session_state.date_debut_val, 
-                                st.session_state.date_fin_val, 
-                                st.session_state.nb_par_jour, 
-                                st.session_state.jours_feries, 
-                                st.session_state.creneaux_actifs, 
-                                lieux_p, 
-                                ordre, 
-                                horaires, 
-                                jours_m
-                            )
-                            if df_updated is not None:
-                                st.session_state.planning_df = df_updated
-                                promo_subset = df_updated[df_updated['Promotion'].astype(str).str.strip() == str(p_item).strip()]
-                                st.session_state.historique_edt[p_item] = promo_subset.to_dict('records')
-                            
-                            generated_count += 1
-                            progress_bar.progress(generated_count / total_promos)
-                            status_text.text(f"Progression : {generated_count} / {total_promos} promotions générées")
-                            
-                        st.success(f"✅ Génération effectuée avec succès pour toutes les promotions !")
+                        ordre = st.session_state.ordre_matieres.get(promo_selected, None)
+                        horaires = st.session_state.horaires_par_matiere.get(promo_selected, None)
+                        jours_m = st.session_state.jours_par_matiere.get(promo_selected, None)
+                        lieux_p = st.session_state.lieux_par_promo.get(promo_selected, lieux_sel)
+                        
+                        df_updated = generer_planning_promo(
+                            st.session_state.planning_df, 
+                            promo_selected, 
+                            st.session_state.date_debut_val, 
+                            st.session_state.date_fin_val, 
+                            st.session_state.nb_par_jour, 
+                            st.session_state.jours_feries, 
+                            st.session_state.creneaux_actifs, 
+                            lieux_p, 
+                            ordre, 
+                            horaires, 
+                            jours_m
+                        )
+                        if df_updated is not None:
+                            st.session_state.planning_df = df_updated
+                            promo_subset = df_updated[df_updated['Promotion'].astype(str).str.strip() == str(promo_selected).strip()]
+                            st.session_state.historique_edt[promo_selected] = promo_subset.to_dict('records')
+                            st.success(f"✅ Génération effectuée avec succès pour la promotion {promo_selected} !")
 
                 if st.session_state.planning_df is not None:
                     st.markdown("---")
