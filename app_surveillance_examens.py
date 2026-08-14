@@ -415,7 +415,7 @@ def construire_grille_edt(attributions, creneaux_liste):
             if exams:
                 cellules = []
                 for ex in exams:
-                    cell_text = f"📖 {ex['matiere']}\n👤 Chargé: {ex['enseignant']}\n🏫 {ex['lieu']}\n👮\n{ex['surveillants']}"
+                    cell_text = f"📖 {ex['matiere']}\n👤 Chargé de matière: {ex['enseignant']}\n🏫 {ex['lieu']}\n👮\n{ex['surveillants']}"
                     cellules.append(cell_text)
                 row[jour] = "\n---\n".join(cellules)
             else:
