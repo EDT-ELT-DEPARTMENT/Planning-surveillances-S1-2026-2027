@@ -9,7 +9,6 @@ import io
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 import os
 import re
@@ -55,7 +54,6 @@ def init_session_state():
 
 def normaliser_qualite(val):
     val = str(val).strip().lower()
-    # Si le texte contient explicitement vacataire ou chargé/charge de cours
     if 'vacataire' in val or 'charg' in val or 'contractuel' in val or 'doctorant' in val:
         return 'Vacataire'
     mapping = {
@@ -225,6 +223,8 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
         
     idx = 0
     lieu_idx = 0
+    
+    # On met à jour uniquement les examens de la promotion ciblée dans le DataFrame global/copié
     for i in promo_df.index:
         matiere_nom = promo_df.at[i, 'Enseignements']
         
@@ -248,16 +248,16 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
         creneau = creneau_pref if creneau_pref and creneau_pref in creneaux_dispo else creneaux_dispo[idx % nb_creneaux]
         lieu = lieux[lieu_idx % nb_lieux]
         
-        examens_df.loc[examens_df['Enseignements'] == matiere_nom, 'date'] = date_examen
-        examens_df.loc[examens_df['Enseignements'] == matiere_nom, 'Horaire'] = creneau
-        examens_df.loc[examens_df['Enseignements'] == matiere_nom, 'Jours'] = JOURS_FR.get(date_examen.strftime("%A"), date_examen.strftime("%A"))
-        examens_df.loc[examens_df['Enseignements'] == matiere_nom, 'Lieu'] = lieu
+        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'date'] = date_examen
+        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Horaire'] = creneau
+        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Jours'] = JOURS_FR.get(date_examen.strftime("%A"), date_examen.strftime("%A"))
+        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Lieu'] = lieu
         
         idx += 1
         lieu_idx += 1
             
-    examens_df = examens_df.sort_values(by=['date', 'Horaire', 'Promotion', 'Lieu'])
-    return examens_df
+    planning_promo_result = examens_df[examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()].sort_values(by=['date', 'Horaire', 'Lieu'])
+    return planning_promo_result
 
 def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
     if planning_df is None or enseignants_df is None:
@@ -318,7 +318,6 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                             surveillants.loc[surveillants['nom'] == nom_ens, 'surveillance_attribuee'] += 1
                             charges_affectees_creneau.add(cle_multi_lieux)
                             
-        # Position 1: S'il manque du monde et qu'on n'a pas encore le chargé ou de permanent
         if len(liste_surveillants) < 1:
             for _, perm in permanents.iterrows():
                 if perm['nom'] in surveillants_occupes or perm['nom'] in exclus: continue
@@ -330,7 +329,6 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                     surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'] += 1
                     break
                     
-        # Position 2 EXPLICITE : Le Vacataire DOIT figurer en deuxième position si nb_par_lieu >= 2
         if nb_par_lieu >= 2 and len(liste_surveillants) == 1:
             vacataire_trouve = False
             for _, vac in vacataires.iterrows():
@@ -773,7 +771,7 @@ def main():
                 <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
-                <li>🕐 <b>Choix du jour et de l'horaire par matière</b></li>
+                <li>🕐 <b>Choix du jour et de l'horaire par matière</b> (par promotion isolée)</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -799,7 +797,7 @@ def main():
         else: st.warning("Données non chargées.")
 
     with tabs[2]:
-        st.markdown('<div class="sub-header">Planification par Promotion (Personnalisation Jour & Horaire par matière)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">Planification par Promotion (Génération indépendante)</div>', unsafe_allow_html=True)
         if st.session_state.data_loaded and st.session_state.promotions_list:
             promo_selected = st.selectbox("📚 Sélectionner une promotion", st.session_state.promotions_list, index=0, key="w_promo_sel")
             st.session_state.promo_selected = promo_selected
@@ -838,26 +836,33 @@ def main():
                             elif m_nom in st.session_state.horaires_par_matiere[promo_selected]:
                                 del st.session_state.horaires_par_matiere[promo_selected][m_nom]
                 
-                if st.button(f"🚀 Générer le Planning pour {promo_selected}", type="primary", key=f"btn_gen_{promo_selected}"):
+                if st.button(f"🚀 Générer le Planning uniquement pour {promo_selected}", type="primary", key=f"btn_gen_{promo_selected}"):
                     if len(lieux_sel) == 0: st.error("❌ Sélectionnez au moins un lieu.")
                     elif len(creneaux_sel) == 0: st.error("❌ Sélectionnez au moins un créneau.")
                     else:
-                        with st.spinner(f"Génération chronologique pour {promo_selected}..."):
+                        with st.spinner(f"Génération chronologique exclusive pour {promo_selected}..."):
                             ordre = st.session_state.ordre_matieres.get(promo_selected, None)
                             horaires = st.session_state.horaires_par_matiere.get(promo_selected, None)
                             jours_m = st.session_state.jours_par_matiere.get(promo_selected, None)
-                            planning = generer_planning_promo(st.session_state.examens_df.copy(), promo_selected, st.session_state.date_debut_val, st.session_state.jours_feries, creneaux_sel, lieux_sel, ordre, horaires, jours_m)
-                            if planning is not None:
-                                st.session_state.planning_df = planning
-                                st.success(f"✅ Planning généré et trié chronologiquement pour {promo_selected}!")
+                            
+                            # Initialisation du planning global s'il n'existe pas
+                            if st.session_state.planning_df is None:
+                                st.session_state.planning_df = st.session_state.examens_df.copy()
+                                
+                            planning_promo = generer_planning_promo(st.session_state.planning_df, promo_selected, st.session_state.date_debut_val, st.session_state.jours_feries, creneaux_sel, lieux_sel, ordre, horaires, jours_m)
+                            if planning_promo is not None:
+                                st.session_state.planning_df = planning_promo
+                                st.success(f"✅ Planning généré et mis à jour exclusivement pour la promotion **{promo_selected}** !")
                             else: st.error("❌ Erreur de génération.")
 
                 if st.session_state.planning_df is not None:
                     st.markdown("---")
-                    st.markdown(f"#### 📝 Planning de {promo_selected}")
+                    st.markdown(f"#### 📝 Planning actuel de la promotion sélectionnée : {promo_selected}")
                     planning_display = st.session_state.planning_df[st.session_state.planning_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()].copy()
                     if not planning_display.empty:
                         st.dataframe(planning_display[['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'date']], use_container_width=True, hide_index=True)
+                    else:
+                        st.info(f"Aucun examen planifié pour {promo_selected} pour le moment. Cliquez sur le bouton de génération ci-dessus.")
         else: st.warning("Aucune promotion détectée.")
 
     with tabs[3]:
@@ -920,7 +925,7 @@ def main():
             attributions = st.session_state.surveillance_df
             col1, col2, col3 = st.columns(3)
             with col1: st.download_button("⬇️ Télécharger HTML", generer_tableau_html(attributions), "planning_surveillances.html", "text/html", key="dl_gh")
-            with col2: st.download_button("⬇️ Télécharger Excel", generer_excel_colore(attributions), "planning_surveillances.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_gx")
+            with col2: st.download_button("⬇️ Télécharger Excel", generer_excel_colore(attributions), "planning_surveillances.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.spreadsheet", key="dl_gx")
             with col3: st.download_button("⬇️ Télécharger PDF", generer_pdf(attributions), "planning_surveillances.pdf", "application/pdf", key="dl_gp")
             st.markdown("---")
             st.markdown(generer_tableau_html(attributions), unsafe_allow_html=True)
