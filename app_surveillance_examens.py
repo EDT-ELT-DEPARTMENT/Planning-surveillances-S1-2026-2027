@@ -47,7 +47,7 @@ def init_session_state():
         'permanents_list': [], 'vacataires_list': [], 'all_enseignants_list': [],
         'ordre_matieres': {}, 'lieux_par_promo': {},
         'horaires_par_matiere': {}, 'jours_par_matiere': {}, 'edt_par_promo': {},
-        'historique_edt': {}, 'planning_manuel': {}  # NOUVEAU : stockage du planning manuel
+        'historique_edt': {}, 'planning_manuel': {}
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -186,7 +186,7 @@ def est_jour_travaille(date_obj, jours_feries):
     return True
 
 def generer_dates_travail(date_debut, nb_jours=30, jours_feries=None):
-    """Génère une liste de dates de travail disponibles"""
+    """Génère une liste de dates de travail disponibles (exclut week-ends et jours fériés)"""
     if jours_feries is None:
         jours_feries = []
     dates = []
@@ -209,9 +209,9 @@ def creer_planning_manuel_df(examens_df, promotion, dates_disponibles):
             'Enseignements': row.get('Enseignements', ''),
             'Enseignants': row.get('Enseignants', ''),
             'Code': row.get('Code', ''),
-            'Date': None,  # À remplir
-            'Horaire': None,  # À remplir
-            'Lieu': None,  # À remplir
+            'Date': None,
+            'Horaire': None,
+            'Lieu': None,
         })
     
     return pd.DataFrame(planning_data)
@@ -222,7 +222,6 @@ def appliquer_planning_manuel(examens_df, promotion, planning_edited):
         st.error("❌ Le planning est vide")
         return None
     
-    # Vérifier que toutes les dates/horaires/lieux sont remplis
     if planning_edited.isnull().any().any():
         st.warning("⚠️ Veuillez remplir TOUS les champs (Date, Horaire, Lieu)")
         return None
@@ -235,17 +234,14 @@ def appliquer_planning_manuel(examens_df, promotion, planning_edited):
         horaire = row.get('Horaire', None)
         lieu = row.get('Lieu', None)
         
-        # Convertir la date si nécessaire
         if isinstance(date_exam, str):
             try:
                 date_exam = datetime.strptime(date_exam, "%Y-%m-%d").date()
             except:
                 date_exam = datetime.strptime(date_exam, "%d/%m/%Y").date()
         
-        # Obtenir le jour de la semaine
         jour = JOURS_FR.get(date_exam.strftime("%A"), date_exam.strftime("%A"))
         
-        # Appliquer à toutes les lignes correspondant à cette matière/promo
         mask = (result['Promotion'].astype(str).str.strip() == str(promotion).strip()) & \
                (result['Enseignements'] == matiere)
         
@@ -633,10 +629,21 @@ def main():
         st.markdown("---")
         st.markdown("### 📅 Dates")
         st.session_state.date_debut_val = st.date_input("Début", st.session_state.date_debut_val)
+        
         jf = st.text_area("Jours fériés (JJ/MM/AAAA)", placeholder="11/11/2026, 25/12/2026...")
         if jf:
-            try: st.session_state.jours_feries = [datetime.strptime(d.strip(), "%d/%m/%Y").date() for d in jf.split(",") if d.strip()]
-            except: st.warning("Format invalide")
+            try: 
+                st.session_state.jours_feries = [datetime.strptime(d.strip(), "%d/%m/%Y").date() for d in jf.split(",") if d.strip()]
+                st.success(f"✅ {len(st.session_state.jours_feries)} jour(s) férié(s)")
+            except: 
+                st.warning("Format invalide")
+                st.session_state.jours_feries = []
+        else:
+            st.session_state.jours_feries = []
+            
+        if st.session_state.jours_feries:
+            jf_display = ", ".join([d.strftime('%d/%m/%Y') for d in sorted(st.session_state.jours_feries)])
+            st.caption(f"🚫 Exclus: {jf_display}")
 
     tabs = st.tabs(["🏠 Accueil", "👥 Enseignants", "🗓️ Planning Manuel", "🎯 Attributions", "📅 EDT Grille", "📊 Export"])
 
@@ -646,9 +653,9 @@ def main():
             <h3>✨ Plateforme de Gestion des EDTs</h3>
             <p><strong>S2 - 2026</strong></p>
             <ul style="text-align:left;">
-                <li>✅ Sélection MANUELLE des dates et horaires</li>
-                <li>✅ Pas de répartition automatique</li>
-                <li>✅ Possible d'avoir 2 examens le même jour à des créneaux différents</li>
+                <li>✅ Dates générées AUTO (1 examen/jour ouvré)</li>
+                <li>✅ Jours fériés et week-ends exclus</li>
+                <li>✅ Modification manuelle possible après génération</li>
                 <li>✅ Attribution intelligente des surveillants</li>
                 <li>✅ Export HTML, Excel, PDF</li>
             </ul>
@@ -664,7 +671,6 @@ def main():
         st.markdown('<div class="sub-header">Gestion des Enseignants</div>', unsafe_allow_html=True)
         if st.session_state.data_loaded:
             df_ens = st.session_state.enseignants_df
-            # Compter les noms UNIQUES (pas les doublons)
             all_ens_uniq = df_ens['nom'].unique().tolist()
             perm_uniq = df_ens[df_ens['qualite'] == 'Permanent']['nom'].unique()
             vac_uniq = df_ens[df_ens['qualite'] == 'Vacataire']['nom'].unique()
@@ -686,130 +692,191 @@ def main():
                 st.warning(f"❌ Exclus: {', '.join(exclus)}")
 
     with tabs[2]:
-        st.markdown('<div class="sub-header">🗓️ Planning Manuel - Sélection Date + Horaire + Lieu</div>', unsafe_allow_html=True)
-        st.markdown("<div class='info-box'><b>✨ NOUVEAU</b> : Choisissez MANUELLEMENT la date (calendrier), l'horaire (3 créneaux) et le lieu (Salles ou Amphithéâtres). Aucune répartition automatique!</div>", unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">🗓️ Planning Manuel - Dates Auto + Modification</div>', unsafe_allow_html=True)
+        st.markdown("<div class='info-box'>🤖 <b>Dates auto-générées</b> : 1 examen par jour ouvré à partir de la date de début. Les jours fériés et week-ends (Ven/Sam) sont exclus. Vous pouvez modifier manuellement chaque date.</div>", unsafe_allow_html=True)
         
         if st.session_state.data_loaded and st.session_state.promotions_list:
             promo_selected = st.selectbox("📚 Promotion", st.session_state.promotions_list, key="promo_planning")
             
             if promo_selected:
-                # Créer le DataFrame pour édition manuelle
                 promo_df = st.session_state.examens_df[st.session_state.examens_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()].copy()
                 
                 if promo_df is not None and not promo_df.empty:
-                    st.markdown(f"#### Configurer les examens de {promo_selected}")
-                    st.markdown("**Choisissez pour chaque examen: 📅 Date (Calendrier) | ⏰ Horaire (3 créneaux) | 📍 Lieu (Salle OU Amphi)**")
+                    st.markdown(f"#### 📚 Examens de {promo_selected}")
+                    
+                    # --- GESTION DES DATES AUTO ---
+                    nb_examens = len(promo_df)
+                    dates_travail = generer_dates_travail(st.session_state.date_debut_val, nb_examens, st.session_state.jours_feries)
+                    
+                    # Boutons de contrôle
+                    col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 3])
+                    
+                    with col_btn1:
+                        if st.button("🔄 Régénérer dates auto", key=f"btn_regen_{promo_selected}", use_container_width=True):
+                            for idx in range(nb_examens):
+                                key = f"date_{promo_selected}_{idx}"
+                                if key in st.session_state:
+                                    del st.session_state[key]
+                                hkey = f"horaire_{promo_selected}_{idx}"
+                                if hkey in st.session_state:
+                                    del st.session_state[hkey]
+                            init_key = f"dates_init_{promo_selected}"
+                            if init_key in st.session_state:
+                                del st.session_state[init_key]
+                            st.rerun()
+                    
+                    with col_btn2:
+                        if st.button("📅 Voir calendrier ouvré", key=f"btn_cal_{promo_selected}", use_container_width=True):
+                            cal_str = ", ".join([d.strftime('%d/%m') for d in dates_travail[:10]])
+                            if len(dates_travail) > 10:
+                                cal_str += f" ... (+{len(dates_travail)-10} autres)"
+                            st.info(f"📆 Dates ouvrées générées: {cal_str}")
+                    
+                    with col_btn3:
+                        st.caption(f"🗓️ Début: {st.session_state.date_debut_val.strftime('%d/%m/%Y')} | 🚫 Jours fériés: {len(st.session_state.jours_feries)} | 📊 Examens: {nb_examens}")
+                    
+                    # Initialisation auto des dates (première ouverture de la promo)
+                    init_key = f"dates_init_{promo_selected}"
+                    if init_key not in st.session_state:
+                        for idx in range(nb_examens):
+                            date_key = f"date_{promo_selected}_{idx}"
+                            if date_key not in st.session_state:
+                                st.session_state[date_key] = dates_travail[idx] if idx < len(dates_travail) else st.session_state.date_debut_val
+                        st.session_state[init_key] = True
+                    
+                    st.markdown("---")
+                    st.markdown("**📝 Configurez chaque examen (dates pré-remplies auto)**")
                     st.markdown("---")
                     
-                    # Stockage des sélections
                     planning_selections = {}
+                    dates_invalides = []
+                    lieux_invalides = []
                     
-                    # Créer une ligne par examen avec inputs personnalisés
                     for idx, (_, exam) in enumerate(promo_df.iterrows()):
                         enseignement = exam.get('Enseignements', '')
                         enseignant = exam.get('Enseignants', '')
                         code = exam.get('Code', '')
                         
-                        # Créer un expander pour chaque examen
-                        with st.expander(f"📚 {enseignement} - {enseignant}", expanded=(idx==0)):
+                        with st.expander(f"📚 {enseignement} - {enseignant} (Auto: {dates_travail[idx].strftime('%d/%m/%Y') if idx < len(dates_travail) else 'N/A'})", expanded=(idx==0)):
                             col_info, col_config = st.columns([2, 3])
                             
-                            # Infos (lecture seule)
                             with col_info:
                                 st.markdown(f"**Enseignement**: {enseignement}")
                                 st.markdown(f"**Enseignant**: {enseignant}")
                                 st.markdown(f"**Code**: {code}")
+                                st.markdown(f"**Date suggérée**: {dates_travail[idx].strftime('%d/%m/%Y') if idx < len(dates_travail) else '—'}")
                             
-                            # Configuration (inputs)
                             with col_config:
                                 st.markdown("**Configuration**")
                                 
-                                # Calendrier pour la date
+                                # --- DATE AVEC VALIDATION ---
+                                date_key = f"date_{promo_selected}_{idx}"
+                                if date_key not in st.session_state:
+                                    st.session_state[date_key] = dates_travail[idx] if idx < len(dates_travail) else st.session_state.date_debut_val
+                                
                                 date_exam = st.date_input(
-                                    "📅 Sélectionner la date",
-                                    value=st.session_state.date_debut_val,
+                                    "📅 Date de l'examen",
                                     min_value=st.session_state.date_debut_val,
-                                    max_value=st.session_state.date_debut_val + timedelta(days=60),
-                                    key=f"date_{promo_selected}_{idx}"
+                                    max_value=st.session_state.date_debut_val + timedelta(days=120),
+                                    key=date_key
                                 )
                                 
-                                # Horaires (3 créneaux)
-                                horaire = st.selectbox(
-                                    "⏰ Sélectionner l'horaire",
-                                    CRENEAUX,
-                                    key=f"horaire_{promo_selected}_{idx}"
-                                )
+                                # Vérification stricte : pas de jour férié, pas de week-end
+                                if not est_jour_travaille(date_exam, st.session_state.jours_feries):
+                                    jour_nom = JOURS_FR.get(date_exam.strftime('%A'), date_exam.strftime('%A'))
+                                    st.error(f"🚫 **INTERDIT** : {date_exam.strftime('%d/%m/%Y')} ({jour_nom}) est un jour non ouvré! Changez la date.")
+                                    dates_invalides.append(enseignement)
+                                    date_valide = False
+                                else:
+                                    date_valide = True
+                                    st.success(f"✅ Date valide: {date_exam.strftime('%d/%m/%Y')} ({JOURS_FR.get(date_exam.strftime('%A'), date_exam.strftime('%A'))})")
                                 
-                                # Lieu: Deux colonnes (Salles + Amphis)
+                                # --- HORAIRE ---
+                                horaire_key = f"horaire_{promo_selected}_{idx}"
+                                if horaire_key not in st.session_state:
+                                    # Rotation par défaut des créneaux
+                                    st.session_state[horaire_key] = CRENEAUX[idx % len(CRENEAUX)]
+                                horaire = st.selectbox("⏰ Horaire", CRENEAUX, key=horaire_key)
+                                
+                                # --- LIEU ---
+                                salle_key = f"salle_{promo_selected}_{idx}"
+                                amphi_key = f"amphi_{promo_selected}_{idx}"
+                                
+                                if salle_key not in st.session_state:
+                                    st.session_state[salle_key] = ""
+                                if amphi_key not in st.session_state:
+                                    st.session_state[amphi_key] = ""
+                                    
                                 lieu_col1, lieu_col2 = st.columns(2)
-                                
                                 with lieu_col1:
-                                    salle = st.selectbox(
-                                        "🏫 Salle (S01-S18)",
-                                        [""] + SALLES,
-                                        key=f"salle_{promo_selected}_{idx}"
-                                    )
-                                
+                                    salle = st.selectbox("🏫 Salle", [""] + SALLES, key=salle_key)
                                 with lieu_col2:
-                                    amphi = st.selectbox(
-                                        "🎓 Amphithéâtre (A01-A12)",
-                                        [""] + AMPHIS,
-                                        key=f"amphi_{promo_selected}_{idx}"
-                                    )
+                                    amphi = st.selectbox("🎓 Amphi", [""] + AMPHIS, key=amphi_key)
                                 
-                                # Vérifier qu'au moins un lieu est sélectionné
                                 if salle == "" and amphi == "":
-                                    st.warning("⚠️ Sélectionnez au moins un lieu (Salle OU Amphi)")
+                                    st.warning("⚠️ Sélectionnez au moins un lieu")
                                     lieu_final = None
+                                    lieux_invalides.append(enseignement)
                                 elif salle != "" and amphi != "":
-                                    st.error("❌ Choisissez SOIT une Salle SOIT un Amphi, pas les deux!")
+                                    st.error("❌ Choisissez SOIT une Salle SOIT un Amphi!")
                                     lieu_final = None
+                                    lieux_invalides.append(enseignement)
                                 else:
                                     lieu_final = salle if salle != "" else amphi
-                                    st.success(f"✅ Lieu sélectionné: {lieu_final}")
+                                    st.info(f"📍 Lieu: {lieu_final}")
                                 
-                                # Stocker les sélections
-                                planning_selections[enseignement] = {
-                                    'date': date_exam,
-                                    'horaire': horaire,
-                                    'lieu': lieu_final
-                                }
+                                if date_valide and lieu_final:
+                                    planning_selections[enseignement] = {
+                                        'date': date_exam, 'horaire': horaire, 'lieu': lieu_final
+                                    }
                     
                     st.markdown("---")
                     
-                    if st.button("✅ Appliquer et Générer", type="primary", key="btn_apply_planning", use_container_width=True):
-                        # Vérifier que toutes les sélections sont valides
-                        invalides = [m for m, sel in planning_selections.items() if sel['lieu'] is None]
+                    # Récap des dates assignées
+                    if planning_selections:
+                        st.markdown("#### 📋 Aperçu des dates assignées")
+                        recap = []
+                        for ens, sel in planning_selections.items():
+                            recap.append({
+                                'Enseignement': ens,
+                                'Date': sel['date'].strftime('%d/%m/%Y'),
+                                'Jour': JOURS_FR.get(sel['date'].strftime('%A'), sel['date'].strftime('%A')),
+                                'Horaire': sel['horaire'],
+                                'Lieu': sel['lieu']
+                            })
+                        st.dataframe(pd.DataFrame(recap), use_container_width=True, hide_index=True)
+                    
+                    # Bouton appliquer avec validation
+                    btn_disabled = len(dates_invalides) > 0 or len(lieux_invalides) > 0
+                    
+                    if dates_invalides:
+                        st.error(f"🚫 Dates invalides (fériées/week-end) pour: {', '.join(dates_invalides)}")
+                    if lieux_invalides:
+                        st.error(f"🚫 Lieux invalides pour: {', '.join(lieux_invalides)}")
+                    
+                    if st.button("✅ Appliquer et Générer le Planning", type="primary", key="btn_apply_planning", use_container_width=True, disabled=btn_disabled):
+                        planning_edited = []
+                        for enseignement, sels in planning_selections.items():
+                            planning_edited.append({
+                                'Enseignements': enseignement,
+                                'Date': sels['date'],
+                                'Horaire': sels['horaire'],
+                                'Lieu': sels['lieu']
+                            })
+                        planning_edited_df = pd.DataFrame(planning_edited)
+                        planning_updated = appliquer_planning_manuel(st.session_state.examens_df, promo_selected, planning_edited_df)
                         
-                        if invalides:
-                            st.error(f"❌ Veuillez sélectionner un lieu pour: {', '.join(invalides)}")
-                        else:
-                            # Créer le planning édité
-                            planning_edited = []
-                            for enseignement, sels in planning_selections.items():
-                                planning_edited.append({
-                                    'Enseignements': enseignement,
-                                    'Date': sels['date'],
-                                    'Horaire': sels['horaire'],
-                                    'Lieu': sels['lieu']
-                                })
+                        if planning_updated is not None:
+                            st.session_state.planning_df = planning_updated
+                            st.session_state.planning_manuel[promo_selected] = planning_edited_df.to_dict('records')
+                            st.success(f"✅ Planning de {promo_selected} configuré avec succès!")
                             
-                            planning_edited_df = pd.DataFrame(planning_edited)
-                            
-                            # Appliquer le planning
-                            planning_updated = appliquer_planning_manuel(st.session_state.examens_df, promo_selected, planning_edited_df)
-                            
-                            if planning_updated is not None:
-                                st.session_state.planning_df = planning_updated
-                                st.session_state.planning_manuel[promo_selected] = planning_edited_df.to_dict('records')
-                                st.success(f"✅ Planning de {promo_selected} configuré avec succès!")
-                                
-                                # Afficher le planning appliqué
-                                st.markdown("---")
-                                st.markdown("#### 📋 Planning Appliqué")
-                                result_df = planning_updated[planning_updated['Promotion'] == promo_selected][['Enseignements', 'Enseignants', 'date', 'Horaire', 'Jours', 'Lieu']].copy()
-                                result_df.columns = ['Enseignement', 'Enseignant', 'Date', 'Horaire', 'Jour', 'Lieu']
-                                st.dataframe(result_df, use_container_width=True, hide_index=True)
+                            st.markdown("---")
+                            st.markdown("#### 📅 Planning Appliqué")
+                            result_df = planning_updated[planning_updated['Promotion'] == promo_selected][['Enseignements', 'Enseignants', 'date', 'Horaire', 'Jours', 'Lieu']].copy()
+                            result_df.columns = ['Enseignement', 'Enseignant', 'Date', 'Horaire', 'Jour', 'Lieu']
+                            result_df['Date'] = result_df['Date'].apply(lambda x: x.strftime('%d/%m/%Y') if hasattr(x, 'strftime') else str(x))
+                            st.dataframe(result_df, use_container_width=True, hide_index=True)
                 else:
                     st.warning(f"Aucun examen pour {promo_selected}")
 
