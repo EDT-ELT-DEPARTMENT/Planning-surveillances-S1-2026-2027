@@ -102,6 +102,8 @@ def charger_fichier_source_auto():
                 break
         if ens_sheet is None and len(sheet_names) > 0:
             ens_sheet = sheet_names[0]
+        
+        # Application de la disposition corrigée : Enseignements, Code, Enseignants, Horaire, Jours, Lieu, Promotion[cite: 3]
         df_ens = pd.read_excel(file_path, sheet_name=ens_sheet)
         df_ens.columns = [str(col).strip() for col in df_ens.columns]
         cols_orig = list(df_ens.columns)
@@ -119,8 +121,8 @@ def charger_fichier_source_auto():
         rename_map = {}
         if 'nom' in col_map: rename_map[col_map['nom']] = 'nom'
         if 'qualite' in col_map: rename_map[col_map['qualite']] = 'qualite'
-        if 'enseignements' in col_map: rename_map[col_map['enseignements']] = 'enseignements'
-        if 'promotion' in col_map: rename_map[col_map['promotion']] = 'promotion'
+        if 'enseignements' in col_map: rename_map[col_map['enseignements']] = 'Enseignements'
+        if 'promotion' in col_map: rename_map[col_map['promotion']] = 'Promotion'
         df_ens = df_ens.rename(columns=rename_map)
         if 'nom' not in df_ens.columns:
             for col in df_ens.columns:
@@ -129,14 +131,14 @@ def charger_fichier_source_auto():
                     if len(sample) > 0 and sample.str.len().mean() > 3:
                         df_ens['nom'] = df_ens[col]
                         break
-        for col in ['qualite', 'enseignements', 'promotion']:
+        for col in ['qualite', 'Enseignements', 'Promotion']:
             if col not in df_ens.columns:
                 df_ens[col] = ''
         df_ens = df_ens[df_ens['nom'].notna() & (df_ens['nom'].astype(str).str.strip() != '')].copy()
         df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)
         examens_data = []
         for _, row in df_ens.iterrows():
-            raw_ens = str(row.get('enseignements', ''))
+            raw_ens = str(row.get('Enseignements', ''))
             items = re.split(r'[,;/]+', raw_ens)
             for item in items:
                 item = item.strip()
@@ -149,11 +151,11 @@ def charger_fichier_source_auto():
                         'Enseignants': str(row.get('nom', '')).strip(), 
                         'qualite_ens': row.get('qualite', 'Permanent'),
                         'Horaire': None, 'Jours': None, 'Lieu': None,
-                        'Promotion': str(row.get('promotion', '')).strip(),
+                        'Promotion': str(row.get('Promotion', '')).strip(),
                         'ordre': 999
                     })
         df_exam = pd.DataFrame(examens_data)
-        colonnes_attendues = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion']
+        colonnes_attendues = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion'] #[cite: 3]
         for col in colonnes_attendues:
             if col not in df_exam.columns:
                 df_exam[col] = ''
@@ -677,6 +679,7 @@ def generer_excel_colore(attributions):
             date_str = str(date_val)
             jour = ''
         surv_str = ", ".join([f"{s['nom']} ({s['qualite']})" for s in attr.get('details_surveillants', [])])
+        # Respect de la disposition stricte des colonnes demandée : Enseignements, Code, Enseignants, Horaire, Jours, Lieu, Promotion[cite: 3]
         data.append({
             'Enseignements': attr.get('matiere', ''), 
             'Code': f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}", 
@@ -689,7 +692,7 @@ def generer_excel_colore(attributions):
             'Surveillants': surv_str
         })
     df = pd.DataFrame(data)
-    cols_order = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Date', 'Surveillants']
+    cols_order = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Date', 'Surveillants'] #[cite: 3]
     df = df[[c for c in cols_order if c in df.columns]]
     
     header_fill = PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid")
@@ -726,6 +729,7 @@ def generer_pdf(attributions):
     elements.append(Paragraph(TITRE_PLATEFORME, title_style))
     elements.append(Paragraph("PLANNING CHRONOLOGIQUE DES SURVEILLANCES", styles['Heading2']))
     elements.append(Spacer(1, 0.3*cm))
+    # Disposition stricte des colonnes : Enseignements, Code, Enseignants, Horaire, Jours, Lieu, Promotion[cite: 3]
     table_data = [['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Date', 'Surveillants']]
     for attr in attributions:
         date_val = attr.get('date', None)
@@ -893,7 +897,7 @@ def main():
             exclus = st.multiselect("Sélectionner les enseignants à EXCLURE", sorted(all_ens), default=st.session_state.exclus_manuels, key="w_exclus")
             st.session_state.exclus_manuels = exclus
             if not df_ens.empty:
-                disp_ens = df_ens[['nom', 'qualite', 'enseignements', 'promotion']].copy()
+                disp_ens = df_ens[['nom', 'qualite', 'Enseignements', 'Promotion']].copy()
                 disp_ens['Exclu'] = disp_ens['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
                 disp_ens = disp_ens.sort_values(by=['qualite', 'nom'], ascending=[True, True])
                 st.dataframe(disp_ens, use_container_width=True, hide_index=True)
@@ -1030,7 +1034,6 @@ def main():
                                     except:
                                         pass
                                 
-                                # Vérification anti-weekend / anti-férié
                                 if not est_jour_travaille(new_date, st.session_state.jours_feries):
                                     erreur_detectee = True
                                     d_str = new_date.strftime('%d/%m/%Y') if hasattr(new_date, 'strftime') else str(new_date)
@@ -1078,6 +1081,7 @@ def main():
                     ds = d.strftime('%d/%m/%Y') if hasattr(d, 'strftime') else str(d) if d else ''
                     jour = JOURS_FR.get(d.strftime('%A'), d.strftime('%A')) if hasattr(d, 'strftime') else ''
                     surv_noms = ", ".join([s['nom'] for s in attr.get('details_surveillants', [])])
+                    # Respect de la disposition stricte : Enseignements, Code, Enseignants, Horaire, Jours, Lieu, Promotion[cite: 3]
                     attr_data.append({
                         'Enseignements': attr.get('matiere', ''),
                         'Code': f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}",
@@ -1192,7 +1196,7 @@ def main():
                             with b_ind1:
                                 st.download_button(f"HTML - {promo}", generer_html_edt(df_g, promo), f"EDT_{promo}.html", "text/html", key=f"rep_html_{promo}")
                             with b_ind2:
-                                st.download_button(f"Excel - {promo}", generer_excel_edt(df_g, promo), f"EDT_{promo}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"rep_xlsx_{promo}")
+                                st.download_button(f"Excel - {promo}", generer_excel_edt(df_g, promo), f"EDT_{promo}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.spreadsheet", key=f"rep_xlsx_{promo}")
                             with b_ind3:
                                 st.download_button(f"PDF - {promo}", generer_pdf_edt(attr_promo, promo, st.session_state.creneaux_actifs), f"EDT_{promo}.pdf", "application/pdf", key=f"rep_pdf_{promo}")
                 else:
