@@ -205,6 +205,7 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
     promo_df = examens_df[examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()].copy()
     if promo_df.empty:
         return None
+    
     if ordre_matieres and promotion in ordre_matieres:
         ordre_map = {m: i for i, m in enumerate(ordre_matieres[promotion])}
         promo_df['ordre'] = promo_df['Enseignements'].map(ordre_map).fillna(999).astype(int)
@@ -214,11 +215,11 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
         
     nb_lieux = len(lieux)
     if nb_lieux == 0:
-        st.error("Veuillez selectionner au moins un lieu.")
+        st.error("Veuillez sélectionner au moins un lieu.")
         return None
     creneaux_dispo = creneaux if creneaux else CRENEAUX
     if len(creneaux_dispo) == 0:
-        st.error("Veuillez selectionner au moins un creneau.")
+        st.error("Veuillez sélectionner au moins un créneau.")
         return None
         
     creneaux_occupes = set()
@@ -229,6 +230,7 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
     for i in promo_df.index:
         matiere_nom = promo_df.at[i, 'Enseignements']
         
+        # 1. Récupération de la date personnalisée pour cette matière
         date_pref = jours_matiere.get(promotion, {}).get(matiere_nom) if jours_matiere else None
         if date_pref:
             if isinstance(date_pref, datetime):
@@ -243,6 +245,7 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
         else:
             d_ex = None
             
+        # 2. Récupération de l'horaire personnalisé pour cette matière
         creneau_pref = horaires_matiere.get(promotion, {}).get(matiere_nom) if horaires_matiere else None
         
         found_slot = False
@@ -253,16 +256,21 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
                 date_examen += timedelta(days=1)
                 
             exams_ce_jour = examens_par_jour_count.get(date_examen, 0)
-            if exams_ce_jour < nb_par_jour:
-                for c in creneaux_dispo:
+            if exams_ce_jour < nb_par_jour or d_ex: # Si date fixe imposée, on autorise l'ajout même si le max journalier est atteint
+                # On teste les créneaux disponibles
+                creneaux_a_tester = [creneau_pref] if (creneau_pref and creneau_pref in creneaux_dispo) else creneaux_dispo
+                for c in creneaux_a_tester:
                     if (date_examen, c) not in creneaux_occupes:
-                        if creneau_pref and creneau_pref != c and not d_ex:
-                            continue
                         creneau = c
                         found_slot = True
                         break
+            
             if not found_slot:
-                date_examen += timedelta(days=1)
+                if d_ex:
+                    # Si la date fixe est saturée, on avance d'un jour pour trouver de la place tout en gardant la priorité
+                    date_examen += timedelta(days=1)
+                else:
+                    date_examen += timedelta(days=1)
 
         creneaux_occupes.add((date_examen, creneau))
         examens_par_jour_count[date_examen] = examens_par_jour_count.get(date_examen, 0) + 1
@@ -274,7 +282,8 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
         examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Lieu'] = lieu
         
         lieu_idx += 1
-        date_courante = date_examen
+        if not d_ex:
+            date_courante = date_examen
             
     planning_promo_result = examens_df[examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()].sort_values(by=['date', 'Horaire', 'Lieu'])
     return planning_promo_result
