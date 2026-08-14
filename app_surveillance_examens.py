@@ -231,7 +231,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
     if promo_df.empty:
         return examens_df
         
-    # Gestion du fractionnement / filtrage par groupe
     if groupes_actifs and len(groupes_actifs) > 0 and 'Groupe' in promo_df.columns:
         promo_df = promo_df[promo_df['Groupe'].isin(groupes_actifs + ['Global'])].copy()
     
@@ -325,6 +324,9 @@ def attribuer_surveillants(planning_df, enseignants_df):
     autres = surveillants[(~surveillants['qualite'].isin(['Permanent', 'Vacataire'])) & (~surveillants['nom'].isin(exclus))].copy().sort_values('surveillance_attribuee')
     
     attributions = []
+    
+    # Suivi global des enseignants occupés par créneau (pour éviter les chevauchements multi-lieux)
+    enseignants_occupes_par_creneau = {}
     charges_affectees_creneau = set()
 
     for idx, examen in planning_df.iterrows():
@@ -339,28 +341,31 @@ def attribuer_surveillants(planning_df, enseignants_df):
         if date_examen is None or pd.isna(date_examen):
             continue
             
-        # Détermination dynamique du quota de surveillance selon le type de lieu (Salle vs Amphi)
+        # Normalisation de la date pour la clé de créneau
+        if isinstance(date_examen, datetime):
+            d_key = date_examen.date()
+        elif isinstance(date_examen, str):
+            try:
+                d_key = datetime.strptime(date_examen, "%Y-%m-%d").date()
+            except:
+                d_key = date_examen
+        else:
+            d_key = date_examen
+
+        creneau_key = (d_key, creneau_examen)
+        if creneau_key not in enseignants_occupes_par_creneau:
+            enseignants_occupes_par_creneau[creneau_key] = set()
+            
+        surveillants_occupes = enseignants_occupes_par_creneau[creneau_key]
+
         is_amphi = str(lieu_examen).strip().upper().startswith('A')
         nb_surv_requis = st.session_state.get('nb_surv_par_amphi', 3) if is_amphi else st.session_state.get('nb_surv_par_salle', 2)
             
-        surveillants_occupes = set()
-        for attr in attributions:
-            attr_date = attr.get('date', None)
-            if attr_date is not None and attr.get('creneau') == creneau_examen:
-                d1 = attr_date.date() if isinstance(attr_date, datetime) else attr_date
-                d2 = date_examen.date() if isinstance(date_examen, datetime) else date_examen
-                if isinstance(d1, str):
-                    try: d1 = datetime.strptime(d1, "%Y-%m-%d").date()
-                    except: d1 = None
-                if isinstance(d2, str):
-                    try: d2 = datetime.strptime(d2, "%Y-%m-%d").date()
-                    except: d2 = None
-                if d1 and d2 and d1 == d2:
-                    surveillants_occupes.update(attr.get('surveillants', []))
-                    
         liste_surveillants = []
         
-        cle_multi_lieux = (date_examen, creneau_examen, matiere_examen, enseignant_matiere)
+        cle_multi_lieux = (d_key, creneau_examen, matiere_examen, enseignant_matiere)
+        
+        # 1. Gestion du chargé de cours / matière (Par défaut dans la première affectation, non dupliqué en cas de conflit)
         if enseignant_matiere and str(enseignant_matiere) not in ['nan', '', 'None']:
             if cle_multi_lieux not in charges_affectees_creneau:
                 ens_info = surveillants[surveillants['nom'] == enseignant_matiere]
@@ -376,52 +381,45 @@ def attribuer_surveillants(planning_df, enseignants_df):
                             surveillants_occupes.add(nom_ens)
                             surveillants.loc[surveillants['nom'] == nom_ens, 'surveillance_attribuee'] += 1
                             charges_affectees_creneau.add(cle_multi_lieux)
-                            
-        if len(liste_surveillants) < 1:
-            for _, perm in permanents.iterrows():
-                if perm['nom'] in surveillants_occupes or perm['nom'] in exclus: continue
-                quota_perm = st.session_state.get('nb_surv_permanent', 3)
-                current_count = surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'].values[0]
-                if current_count < quota_perm:
-                    liste_surveillants.append({'nom': perm['nom'], 'qualite': 'Permanent', 'priorite': 'Permanent'})
-                    surveillants_occupes.add(perm['nom'])
-                    surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'] += 1
-                    break
-                    
-        if nb_surv_requis >= 2 and len(liste_surveillants) == 1:
-            vacataire_trouve = False
-            for _, vac in vacataires.iterrows():
-                if vac['nom'] in surveillants_occupes or vac['nom'] in exclus: continue
-                quota_vac = st.session_state.get('nb_surv_vacataire', 2)
-                current_count = surveillants.loc[surveillants['nom'] == vac['nom'], 'surveillance_attribuee'].values[0]
-                if current_count < quota_vac:
-                    liste_surveillants.append({'nom': vac['nom'], 'qualite': 'Vacataire', 'priorite': 'Vacataire'})
-                    surveillants_occupes.add(vac['nom'])
-                    surveillants.loc[surveillants['nom'] == vac['nom'], 'surveillance_attribuee'] += 1
-                    vacataire_trouve = True
-                    break
-            if not vacataire_trouve:
-                for _, perm in permanents.iterrows():
-                    if perm['nom'] in surveillants_occupes or perm['nom'] in exclus: continue
-                    current_count = surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'].values[0]
-                    if current_count < st.session_state.get('nb_surv_permanent', 3):
-                        liste_surveillants.append({'nom': perm['nom'], 'qualite': 'Permanent', 'priorite': 'Permanent'})
-                        surveillants_occupes.add(perm['nom'])
-                        surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'] += 1
-                        break
 
+        # Fonction de sélection d'un remplaçant / surveillant disponible
+        def trouver_surveillant_disponible(pool_df, qualite_str, quota_defaut):
+            for _, row_s in pool_df.iterrows():
+                s_nom = row_s['nom']
+                if s_nom in surveillants_occupes or s_nom in exclus:
+                    continue
+                q_val = row_s.get('qualite', qualite_str)
+                quota = st.session_state.get(f"nb_surv_{q_val.lower()}", quota_defaut)
+                current_count = surveillants.loc[surveillants['nom'] == s_nom, 'surveillance_attribuee'].values[0]
+                if current_count < quota:
+                    return s_nom, q_val
+            return None, None
+
+        # Si le chargé de cours est déjà pris sur ce créneau (deuxième affectation ou conflit), on pioche un autre surveillant
+        if len(liste_surveillants) < 1:
+            # Essayer un permanent disponible
+            s_nom, q_val = trouver_surveillant_disponible(permanents, 'Permanent', st.session_state.get('nb_surv_permanent', 3))
+            if not s_nom:
+                # Sinon un vacataire
+                s_nom, q_val = trouver_surveillant_disponible(vacataires, 'Vacataire', st.session_state.get('nb_surv_vacataire', 2))
+            if s_nom:
+                liste_surveillants.append({'nom': s_nom, 'qualite': q_val, 'priorite': 'Permanent' if q_val=='Permanent' else 'Vacataire'})
+                surveillants_occupes.add(s_nom)
+                surveillants.loc[surveillants['nom'] == s_nom, 'surveillance_attribuee'] += 1
+
+        # Remplir pour atteindre le quota requis par salle/amphi sans chevauchement
         while len(liste_surveillants) < nb_surv_requis:
-            assigned_added = False
-            for _, aut in autres.iterrows():
-                if aut['nom'] in surveillants_occupes or aut['nom'] in exclus: continue
-                current_count = surveillants.loc[surveillants['nom'] == aut['nom'], 'surveillance_attribuee'].values[0]
-                if current_count < st.session_state.get('nb_surv_autre', 1):
-                    liste_surveillants.append({'nom': aut['nom'], 'qualite': aut['qualite'], 'priorite': 'Autre'})
-                    surveillants_occupes.add(aut['nom'])
-                    surveillants.loc[surveillants['nom'] == aut['nom'], 'surveillance_attribuee'] += 1
-                    assigned_added = True
-                    break
-            if not assigned_added:
+            s_nom, q_val = trouver_surveillant_disponible(permanents, 'Permanent', st.session_state.get('nb_surv_permanent', 3))
+            if not s_nom:
+                s_nom, q_val = trouver_surveillant_disponible(vacataires, 'Vacataire', st.session_state.get('nb_surv_vacataire', 2))
+            if not s_nom:
+                s_nom, q_val = trouver_surveillant_disponible(autres, 'Autre', st.session_state.get('nb_surv_autre', 1))
+            
+            if s_nom:
+                liste_surveillants.append({'nom': s_nom, 'qualite': q_val, 'priorite': 'Autre'})
+                surveillants_occupes.add(s_nom)
+                surveillants.loc[surveillants['nom'] == s_nom, 'surveillance_attribuee'] += 1
+            else:
                 break
                 
         attributions.append({
@@ -964,7 +962,6 @@ def main():
             st.session_state.promo_selected = promo_selected
             
             if promo_selected:
-                # Module de Fractionnement des promotions
                 st.markdown("#### 🔀 Gestion du Fractionnement / Sous-groupes")
                 fractionner = st.checkbox(f"Activer le fractionnement (Sous-groupes) pour {promo_selected}", value=st.session_state.fractionnement_actif.get(promo_selected, False), key=f"chk_frac_{promo_selected}")
                 st.session_state.fractionnement_actif[promo_selected] = fractionner
@@ -1029,9 +1026,7 @@ def main():
                             if 'Groupe' not in st.session_state.planning_df.columns:
                                 st.session_state.planning_df['Groupe'] = 'Global'
                             
-                        # Expansion du DataFrame en cas de fractionnement actif pour cohérence des sous-groupes
                         if fractionner and groupes_actifs:
-                            # S'assurer que les lignes de base ont des sous-groupes affectés si non présents
                             base_rows = []
                             for _, r in st.session_state.examens_df[st.session_state.examens_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()].iterrows():
                                 for g in groupes_actifs:
@@ -1039,7 +1034,6 @@ def main():
                                     r_copy['Groupe'] = g
                                     base_rows.append(r_copy)
                             df_frac = pd.DataFrame(base_rows)
-                            # Remplacer / fusionner dans planning_df
                             st.session_state.planning_df = st.session_state.planning_df[st.session_state.planning_df['Promotion'].astype(str).str.strip() != str(promo_selected).strip()]
                             st.session_state.planning_df = pd.concat([st.session_state.planning_df, df_frac], ignore_index=True)
 
@@ -1144,7 +1138,7 @@ def main():
         st.markdown('<div class="sub-header">Attribution des Surveillants et Édition</div>', unsafe_allow_html=True)
         if st.session_state.planning_df is not None and st.session_state.enseignants_df is not None:
             if st.button("🎯 Attribuer les Surveillants", type="primary", key="btn_attrib"):
-                with st.spinner("Attribution intelligente en cours (avec quotas différenciés Salle / Amphi)..."):
+                with st.spinner("Attribution intelligente en cours (sans chevauchement, quotas Salle/Amphi)..."):
                     attributions, ens_maj = attribuer_surveillants(st.session_state.planning_df, st.session_state.enseignants_df)
                     if attributions is not None:
                         st.session_state.surveillance_df = attributions
