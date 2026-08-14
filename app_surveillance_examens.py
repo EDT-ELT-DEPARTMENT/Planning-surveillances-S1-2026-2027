@@ -251,8 +251,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
         st.error("Veuillez sélectionner au moins un créneau.")
         return None
         
-    # --- RÈGLE 2 : UNIFICATION DES EXAMENS RÉPARTIS SUR PLUSIEURS LIEUX ---
-    # Regroupement préalable (Grouping) par code ou nom de matière pour les traiter comme un bloc indissociable
     groupes_matieres = promo_df.groupby(['Code', 'Enseignements'])
 
     creneaux_occupes = set()
@@ -299,7 +297,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
         creneaux_occupes.add((date_examen, creneau))
         examens_par_jour_count[date_examen] = examens_par_jour_count.get(date_examen, 0) + 1
 
-        # Attribution atomique : un seul et unique Jour et Horaire à l'ensemble du groupe. Placement simultané dans les lieux respectifs.
         for idx_row in group_rows.index:
             lieu = lieux[lieu_idx % nb_lieux]
             lieu_idx += 1
@@ -330,8 +327,6 @@ def attribuer_surveillants(planning_df, enseignants_df):
     
     attributions = []
     
-    # --- RÈGLE 3 : PRÉVENTION DES CHEVAUCHEMENTS D'ENSEIGNANTS ---
-    # Matrice d'occupation globale : disponibilites_enseignants[enseignant_id] = set() stockant les couples (Jour, Horaire) déjà occupés.
     if 'disponibilites_enseignants' not in st.session_state or not isinstance(st.session_state.disponibilites_enseignants, dict):
         st.session_state.disponibilites_enseignants = {}
     disponibilites_enseignants = st.session_state.disponibilites_enseignants
@@ -339,8 +334,6 @@ def attribuer_surveillants(planning_df, enseignants_df):
         if ens_nom not in disponibilites_enseignants:
             disponibilites_enseignants[ens_nom] = set()
 
-    # --- RÈGLE 1 : GESTION DES SURVEILLANCES ET BALAYAGE SÉQUENTIEL (ANTI-SUCCESSION) ---
-    # Pointeur séquentiel (Round-Robin) : index global ou itérateur parcourant la liste des enseignants du premier au dernier de manière équitable.
     liste_tous_ens = surveillants[~surveillants['nom'].isin(exclus)]['nom'].tolist()
     if not liste_tous_ens:
         liste_tous_ens = surveillants['nom'].tolist()
@@ -380,7 +373,6 @@ def attribuer_surveillants(planning_df, enseignants_df):
         liste_surveillants = []
         cle_multi_lieux = (d_key, creneau_examen, matiere_examen, enseignant_matiere)
         
-        # Gestion du chargé de cours / matière
         if enseignant_matiere and str(enseignant_matiere) not in ['nan', '', 'None']:
             if cle_multi_lieux not in charges_affectees_creneau:
                 ens_info = surveillants[surveillants['nom'] == enseignant_matiere]
@@ -388,11 +380,9 @@ def attribuer_surveillants(planning_df, enseignants_df):
                     nom_ens = ens_info.iloc[0]['nom']
                     qualite_ens = ens_info.iloc[0]['qualite']
                     
-                    # Validation stricte des chevauchements et anti-succession
                     creneaux_occupes_ens = disponibilites_enseignants.get(nom_ens, set())
                     chevauchement = creneau_key in creneaux_occupes_ens
                     
-                    # Vérification anti-succession : vérifie s'il a déjà été affecté au créneau immédiatement précédent le même jour
                     anti_succession = False
                     if creneau_examen in creneaux_actifs:
                         idx_c = creneaux_actifs.index(creneau_examen)
@@ -411,8 +401,20 @@ def attribuer_surveillants(planning_df, enseignants_df):
                             surveillants.loc[surveillants['nom'] == nom_ens, 'surveillance_attribuee'] += 1
                             charges_affectees_creneau.add(cle_multi_lieux)
 
-        # Fonction de sélection d'un surveillant via balayage séquentiel (Round-Robin) et anti-succession strict
-        def trouver_surveillant_round_robin():
+        # Règle d'attribution des vacataires et permanents[cite: 7] :
+        # - Pour 3 surveillants (Amphis) : 1 vacataire et 2 permanents[cite: 7].
+        # - Pour 2 surveillants (Salles) : 2 permanents[cite: 7].
+        if nb_surv_requis == 3:
+            target_vacataires = 1
+            target_permanents = 2
+        elif nb_surv_requis == 2:
+            target_vacataires = 0
+            target_permanents = 2
+        else:
+            target_vacataires = 0
+            target_permanents = nb_surv_requis
+
+        def trouver_surveillant_round_robin(qualite_souhaitee=None):
             n_total = len(liste_tous_ens)
             if n_total == 0:
                 return None, None
@@ -423,12 +425,18 @@ def attribuer_surveillants(planning_df, enseignants_df):
                 if s_nom in exclus:
                     continue
                 
+                row_s = surveillants[surveillants['nom'] == s_nom]
+                if row_s.empty:
+                    continue
+                q_val = row_s.iloc[0]['qualite']
+                
+                if qualite_souhaitee and q_val != qualite_souhaitee:
+                    continue
+                
                 creneaux_occupes_ens = disponibilites_enseignants.get(s_nom, set())
-                # Validation stricte : intersection avec créneaux déjà assignés
                 if creneau_key in creneaux_occupes_ens:
                     continue
                 
-                # Vérification d'historique anti-succession
                 anti_succession_val = False
                 if creneau_examen in creneaux_actifs:
                     idx_c = creneaux_actifs.index(creneau_examen)
@@ -439,18 +447,27 @@ def attribuer_surveillants(planning_df, enseignants_df):
                 if anti_succession_val:
                     continue
 
-                row_s = surveillants[surveillants['nom'] == s_nom]
-                if not row_s.empty:
-                    q_val = row_s.iloc[0]['qualite']
-                    quota = st.session_state.get(f"nb_surv_{q_val.lower()}", 3)
-                    current_count = row_s.iloc[0]['surveillance_attribuee']
-                    if current_count < quota:
-                        st.session_state.round_robin_pointer = (idx_courant + 1) % n_total
-                        return s_nom, q_val
+                quota = st.session_state.get(f"nb_surv_{q_val.lower()}", 3)
+                current_count = row_s.iloc[0]['surveillance_attribuee']
+                if current_count < quota:
+                    st.session_state.round_robin_pointer = (idx_courant + 1) % n_total
+                    return s_nom, q_val
+            
+            if qualite_souhaitee:
+                return trouver_surveillant_round_robin(None)
             return None, None
 
         while len(liste_surveillants) < nb_surv_requis:
-            s_nom, q_val = trouver_surveillant_round_robin()
+            current_vacs = sum(1 for s in liste_surveillants if s['qualite'] == 'Vacataire')
+            current_perms = sum(1 for s in liste_surveillants if s['qualite'] == 'Permanent')
+            
+            q_needed = None
+            if current_vacs < target_vacataires:
+                q_needed = 'Vacataire'
+            elif current_perms < target_permanents:
+                q_needed = 'Permanent'
+                
+            s_nom, q_val = trouver_surveillant_round_robin(q_needed)
             if s_nom:
                 liste_surveillants.append({'nom': s_nom, 'qualite': q_val, 'priorite': 'Surveillant'})
                 disponibilites_enseignants[s_nom].add(creneau_key)
@@ -903,6 +920,7 @@ def main():
         st.markdown("#### 🏛️ Quotas par Type de Lieu")
         st.session_state.nb_surv_par_salle = st.number_input("Surv. par Salle", 1, 5, st.session_state.nb_surv_par_salle, key="w_ns")
         st.session_state.nb_surv_par_amphi = st.number_input("Surv. par Amphi", 1, 5, st.session_state.nb_surv_par_amphi, key="w_na")
+        st.markdown("<small style='color: #666;'>Règle active[cite: 7] : 1 vacataire & 2 permanents pour 3 surveillants (Amphi) | 2 permanents pour 2 surveillants (Salle).</small>", unsafe_allow_html=True)
 
         st.markdown("---")
         st.markdown("### 📅 Période & Cadence")
@@ -951,7 +969,7 @@ def main():
                 <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>⏰ <b>Créneaux par défaut intégrés en permanence dans la colonne Horaire</b></li>
-                <li>🎯 Quotas différenciés : <b>Surv. par Salle</b> vs <b>Surv. par Amphi</b></li>
+                <li>🎯 Quotas différenciés[cite: 7] : <b>Surv. par Salle (2 permanents)</b> vs <b>Surv. par Amphi (1 vacataire & 2 permanents)</b></li>
                 <li>🔀 <b>Gestion du fractionnement des promotions</b> (Sous-groupes / Sections)</li>
                 <li>🛠️ <b>Balayage séquentiel (Round-Robin), anti-succession et prévention des chevauchements</b></li>
             </ul>
@@ -969,6 +987,47 @@ def main():
         if st.session_state.data_loaded:
             df_ens = st.session_state.enseignants_df
             all_ens = st.session_state.all_enseignants_list
+            
+            # --- Afficheur numérique du nombre de surveillances par enseignant (via une liste déroulante) ---
+            st.markdown("### 🔢 Afficheur Numérique du Nombre de Surveillances par Enseignant")
+            if all_ens:
+                ens_selectionne = st.selectbox("Sélectionner un enseignant dans la liste déroulante :", sorted(all_ens), key="select_ens_surv_display")
+                if ens_selectionne:
+                    nb_surv_actuel = 0
+                    if 'surveillance_attribuee' in df_ens.columns:
+                        row_e = df_ens[df_ens['nom'] == ens_selectionne]
+                        if not row_e.empty:
+                            nb_surv_actuel = int(row_e.iloc[0]['surveillance_attribuee'])
+                    
+                    details_assigns = []
+                    if st.session_state.surveillance_df is not None:
+                        for attr in st.session_state.surveillance_df:
+                            survs = [s['nom'] for s in attr.get('details_surveillants', [])]
+                            if ens_selectionne in survs or attr.get('enseignant') == ens_selectionne:
+                                details_assigns.append(attr)
+                                
+                    col_m1, col_m2 = st.columns(2)
+                    with col_m1:
+                        st.metric(label=f"Total Surveillances pour : {ens_selectionne}", value=nb_surv_actuel)
+                    with col_m2:
+                        qualite_ens_val = df_ens[df_ens['nom'] == ens_selectionne]['qualite'].values[0] if not df_ens[df_ens['nom'] == ens_selectionne].empty else 'N/A'
+                        st.metric(label="Qualité / Statut", value=qualite_ens_val)
+                        
+                    if details_assigns:
+                        st.markdown(f"**Détails des examens / surveillances associés à {ens_selectionne} :**")
+                        df_details_ens = pd.DataFrame([{
+                            'Date': (a['date'].strftime('%d/%m/%Y') if hasattr(a.get('date'), 'strftime') else str(a.get('date'))),
+                            'Horaire': a.get('creneau'),
+                            'Matière': a.get('matiere'),
+                            'Promotion': a.get('promotion'),
+                            'Lieu': a.get('lieu'),
+                            'Rôle': ('Chargé de matière' if a.get('enseignant') == ens_selectionne else 'Surveillant')
+                        } for a in details_assigns])
+                        st.dataframe(df_details_ens, use_container_width=True, hide_index=True)
+                    else:
+                        st.info(f"Aucune surveillance ou enseignement assigné pour l'instant à {ens_selectionne}.")
+            
+            st.markdown("---")
             exclus = st.multiselect("Sélectionner les enseignants à EXCLURE", sorted(all_ens), default=st.session_state.exclus_manuels, key="w_exclus")
             st.session_state.exclus_manuels = exclus
             if not df_ens.empty:
@@ -976,6 +1035,8 @@ def main():
                     if col_req not in df_ens.columns:
                         df_ens[col_req] = ''
                 disp_ens = df_ens[['nom', 'qualite', 'Enseignements', 'Promotion']].copy()
+                if 'surveillance_attribuee' in df_ens.columns:
+                    disp_ens['Surveillances attribuées'] = df_ens['surveillance_attribuee']
                 disp_ens['Exclu'] = disp_ens['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
                 disp_ens = disp_ens.sort_values(by=['qualite', 'nom'], ascending=[True, True])
                 st.dataframe(disp_ens, use_container_width=True, hide_index=True)
@@ -1174,12 +1235,12 @@ def main():
         st.markdown('<div class="sub-header">Attribution des Surveillants et Édition</div>', unsafe_allow_html=True)
         if st.session_state.planning_df is not None and st.session_state.enseignants_df is not None:
             if st.button("🎯 Attribuer les Surveillants", type="primary", key="btn_attrib"):
-                with st.spinner("Attribution intelligente en cours (Round-Robin, Anti-succesion, Matrice d'occupation)..."):
+                with st.spinner("Attribution intelligente en cours (Round-Robin, Anti-succesion, Règle vacataires/permanents)..."):
                     attributions, ens_maj = attribuer_surveillants(st.session_state.planning_df, st.session_state.enseignants_df)
                     if attributions is not None:
                         st.session_state.surveillance_df = attributions
                         st.session_state.enseignants_df = ens_maj
-                        st.success(f"✅ {len(attributions)} attributions effectuées avec succès !")
+                        st.success(f"✅ {len(attributions)} attributions effectuées avec succès selon les règles en vigueur !")
                     else: st.error("❌ Erreur lors de l'attribution.")
             if st.session_state.surveillance_df is not None:
                 st.markdown("---")
