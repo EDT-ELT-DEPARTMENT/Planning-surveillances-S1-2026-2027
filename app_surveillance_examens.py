@@ -225,7 +225,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
     idx = 0
     lieu_idx = 0
     
-    # On met à jour uniquement les examens de la promotion ciblée dans le DataFrame global/copié
     for i in promo_df.index:
         matiere_nom = promo_df.at[i, 'Enseignements']
         
@@ -415,7 +414,7 @@ def construire_grille_edt(attributions, creneaux_liste):
             if exams:
                 cellules = []
                 for ex in exams:
-                    cell_text = f"📖 {ex['matiere']}\n👤 Chargé de matière: {ex['enseignant']}\n🏫 {ex['lieu']}\n👮\n{ex['surveillants']}"
+                    cell_text = f"📖 {ex['matiere']}\n👤 Chargé: {ex['enseignant']}\n🏫 {ex['lieu']}\n👮\n{ex['surveillants']}"
                     cellules.append(cell_text)
                 row[jour] = "\n---\n".join(cellules)
             else:
@@ -514,42 +513,75 @@ def generer_pdf_edt(attributions, promotion, creneaux_liste):
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=1*cm, leftMargin=1*cm, topMargin=1*cm, bottomMargin=1*cm)
     elements = []
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=14, textColor=colors.HexColor('#1565C0'), spaceAfter=10, alignment=1)
+    
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=13, textColor=colors.HexColor('#1565C0'), spaceAfter=6, alignment=1)
+    subtitle_style = ParagraphStyle('SubTitle', parent=styles['Normal'], alignment=1, fontSize=10, textColor=colors.HexColor('#333333'), spaceAfter=10)
+    
     elements.append(Paragraph(TITRE_PLATEFORME, title_style))
-    elements.append(Paragraph(f"EDT Chronologique - Promotion {promotion}", styles['Normal']))
-    elements.append(Spacer(1, 0.3*cm))
+    elements.append(Paragraph(f"EDT Chronologique - Promotion {promotion}", subtitle_style))
+    elements.append(Spacer(1, 0.2*cm))
+    
     df_grille, jours_ordre, _ = construire_grille_edt(attributions, creneaux_liste)
     if df_grille is None:
         elements.append(Paragraph("Aucune donnee", styles['Normal']))
         doc.build(elements)
         buffer.seek(0)
         return buffer
+        
     jours_cols = [c for c in df_grille.columns if c != 'Creneau']
-    table_data = [['Creneau / Horaire'] + [j.replace('\n', '\n') for j in jours_cols]]
+    
+    header_style = ParagraphStyle('TableHeader', parent=styles['Normal'], fontSize=8, leading=10, textColor=colors.whitesmoke, alignment=1, fontName='Helvetica-Bold')
+    creneau_header_style = ParagraphStyle('CreneauHeader', parent=header_style, fontSize=8, leading=10)
+    
+    table_data = [[Paragraph('Creneau / Horaire', creneau_header_style)] + [Paragraph(j.replace('\n', '<br/>'), header_style) for j in jours_cols]]
+    
+    cell_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontSize=7, leading=9, alignment=1, textColor=colors.HexColor('#333333'))
+    creneau_cell_style = ParagraphStyle('CreneauCell', parent=cell_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#1565C0'))
+    
     for _, row in df_grille.iterrows():
-        row_data = [row['Creneau']]
+        row_data = [Paragraph(str(row['Creneau']), creneau_cell_style)]
         for jour in jours_cols:
             val = row.get(jour, '')
             if val:
-                val = val.replace('📖 ', '').replace('👤 ', 'Chargé: ').replace('🏫 ', 'Lieu: ').replace('👮\n', 'Surv: ').replace('• ', '- ').replace('\n---\n', '\n\n')
-                row_data.append(val)
+                parts = val.split('\n---\n')
+                formatted_parts = []
+                for part in parts:
+                    lines = part.split('\n')
+                    f_lines = []
+                    for line in lines:
+                        if line.startswith('📖 '):
+                            f_lines.append(f"<b>{line}</b>")
+                        elif line.startswith('👤 '):
+                            f_lines.append(f"{line.replace('👤 ', '')}")
+                        elif line.startswith('🏫 '):
+                            f_lines.append(f"<font color='#E65100'><b>{line}</b></font>")
+                        elif line.startswith('• '):
+                            f_lines.append(f"<font color='#2E7D32'>{line}</font>")
+                        elif line == '👮':
+                            continue
+                        else:
+                            f_lines.append(line)
+                    formatted_parts.append("<br/>".join(f_lines))
+                cell_content = "<br/><br/>".join(formatted_parts)
+                row_data.append(Paragraph(cell_content, cell_style))
             else:
-                row_data.append('')
+                row_data.append(Paragraph("", cell_style))
         table_data.append(row_data)
-    available_width = 25 * cm
+        
+    available_width = 27.7 * cm
     col_widths = [3 * cm] + [(available_width - 3 * cm) / len(jours_cols)] * len(jours_cols)
+    
     table = Table(table_data, repeatRows=1, colWidths=col_widths)
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565C0')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 9),
         ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#90CAF9')),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 7),
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#E3F2FD'), colors.HexColor('#FFFFFF')]),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
     ]))
     elements.append(table)
     doc.build(elements)
