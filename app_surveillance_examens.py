@@ -150,8 +150,13 @@ def charger_fichier_source_auto():
                         'ordre': 999
                     })
         df_exam = pd.DataFrame(examens_data)
-        if not df_exam.empty:
-            df_exam.columns = [str(c).strip() for c in df_exam.columns]
+        
+        # SÉCURITÉ GARANTIE : Uniformisation explicite des colonnes indispensables de df_exam
+        colonnes_attendues = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion']
+        for col in colonnes_attendues:
+            if col not in df_exam.columns:
+                df_exam[col] = ''
+                
         df_exam = df_exam.drop_duplicates(subset=['Enseignements', 'Promotion', 'Enseignants']).copy()
         df_exam = df_exam.sort_values('Enseignants').drop_duplicates(subset=['Enseignements', 'Promotion'], keep='first').copy()
         df_ens['nb_surveillance'] = 0
@@ -758,7 +763,6 @@ def main():
             with c4: st.metric("Permanents", len(st.session_state.permanents_list))
             with st.expander("👁️ Aperçu des Cours extraits"):
                 if st.session_state.examens_df is not None and not st.session_state.examens_df.empty:
-                    # Uniformisation robuste des noms de colonnes pour l'affichage (évite tout KeyError)
                     cols_dispo = {c.lower(): c for c in st.session_state.examens_df.columns}
                     col_ens = cols_dispo.get('enseignements', cols_dispo.get('enseignement', list(st.session_state.examens_df.columns)[0]))
                     col_code = cols_dispo.get('code', list(st.session_state.examens_df.columns)[1] if len(st.session_state.examens_df.columns) > 1 else col_ens)
