@@ -155,7 +155,7 @@ def charger_fichier_source_auto():
                         'ordre': 999
                     })
         df_exam = pd.DataFrame(examens_data)
-        colonnes_attendues = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion'] #[cite: 3]
+        colonnes_attendues = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion'][cite: 3]
         for col in colonnes_attendues:
             if col not in df_exam.columns:
                 df_exam[col] = ''
@@ -692,7 +692,7 @@ def generer_excel_colore(attributions):
             'Surveillants': surv_str
         })
     df = pd.DataFrame(data)
-    cols_order = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Date', 'Surveillants'] #[cite: 3]
+    cols_order = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Date', 'Surveillants'][cite: 3]
     df = df[[c for c in cols_order if c in df.columns]]
     
     header_fill = PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid")
@@ -897,7 +897,9 @@ def main():
             exclus = st.multiselect("Sélectionner les enseignants à EXCLURE", sorted(all_ens), default=st.session_state.exclus_manuels, key="w_exclus")
             st.session_state.exclus_manuels = exclus
             if not df_ens.empty:
-                disp_ens = df_ens[['nom', 'qualite', 'Enseignements', 'Promotion']].copy()
+                # Vérification sécurisée des colonnes disponibles pour éviter tout KeyError
+                cols_dispo = [c for c in ['nom', 'qualite', 'Enseignements', 'Promotion'] if c in df_ens.columns]
+                disp_ens = df_ens[cols_dispo].copy()
                 disp_ens['Exclu'] = disp_ens['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
                 disp_ens = disp_ens.sort_values(by=['qualite', 'nom'], ascending=[True, True])
                 st.dataframe(disp_ens, use_container_width=True, hide_index=True)
@@ -1196,7 +1198,7 @@ def main():
                             with b_ind1:
                                 st.download_button(f"HTML - {promo}", generer_html_edt(df_g, promo), f"EDT_{promo}.html", "text/html", key=f"rep_html_{promo}")
                             with b_ind2:
-                                st.download_button(f"Excel - {promo}", generer_excel_edt(df_g, promo), f"EDT_{promo}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.spreadsheet", key=f"rep_xlsx_{promo}")
+                                st.download_button(f"Excel - {promo}", generer_excel_edt(df_g, promo), f"EDT_{promo}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"rep_xlsx_{promo}")
                             with b_ind3:
                                 st.download_button(f"PDF - {promo}", generer_pdf_edt(attr_promo, promo, st.session_state.creneaux_actifs), f"EDT_{promo}.pdf", "application/pdf", key=f"rep_pdf_{promo}")
                 else:
