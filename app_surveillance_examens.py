@@ -1,23 +1,20 @@
-def normaliser_qualite(val):
-    val_clean = str(val).strip().lower()
-    # On cherche explicitement le mot vacataire peu importe les majuscules/accents
-    if 'vacataire' in val_clean or 'vac' in val_clean:
-        return 'Vacataire'
-    return 'Permanent'
-
 def charger_fichier_source_auto():
     try:
-        paths_to_try = [FICHIER_SOURCE, os.path.join(os.getcwd(), FICHIER_SOURCE),
+        paths_to_try = [
+            FICHIER_SOURCE, 
+            os.path.join(os.getcwd(), FICHIER_SOURCE),
             os.path.join(os.path.dirname(os.path.abspath(__file__)), FICHIER_SOURCE),
             os.path.join("/mnt/agents/upload/", FICHIER_SOURCE),
-            os.path.join("/mount/src/planning-surveillances-s1-2026-2027/", FICHIER_SOURCE)]
+            os.path.join("/mount/src/planning-surveillances-s1-2026-2027/", FICHIER_SOURCE)
+        ]
         file_path = None
         for p in paths_to_try:
             if os.path.exists(p):
                 file_path = p
                 break
         if file_path is None:
-            return None, f"Fichier {FICHIER_SOURCE} non trouve"
+            return None, f"Fichier {FICHIER_SOURCE} non trouvé"
+        
         xls = pd.ExcelFile(file_path)
         sheet_names = xls.sheet_names
         ens_sheet = sheet_names[0] if len(sheet_names) > 0 else None
@@ -25,10 +22,8 @@ def charger_fichier_source_auto():
         df_ens = pd.read_excel(file_path, sheet_name=ens_sheet)
         df_ens.columns = [str(col).strip() for col in df_ens.columns]
         
-        # Identification automatique de la colonne Qualité par son contenu si le nom ne correspond pas
         col_qualite_trouvee = None
         for col in df_ens.columns:
-            # Si la colonne contient les mots 'Vacataire' ou 'Permanent' dans ses premières lignes
             echantillon = df_ens[col].dropna().astype(str).str.lower().tolist()
             if any('vacataire' in x for x in echantillon):
                 col_qualite_trouvee = col
@@ -48,7 +43,6 @@ def charger_fichier_source_auto():
             elif any(x in c for x in ['promotion', 'niveau', 'annee', 'class', 'promo', 'niveaux']):
                 col_map['promotion'] = cols_orig[i]
                 
-        # Si la colonne qualité n'a pas été trouvée par son nom, on force celle détectée par son contenu
         if col_qualite_trouvee and ('qualite' not in col_map or not col_map['qualite']):
             col_map['qualite'] = col_qualite_trouvee
 
@@ -67,4 +61,7 @@ def charger_fichier_source_auto():
         df_ens = df_ens[df_ens['nom'].notna() & (df_ens['nom'].astype(str).str.strip() != '')].copy()
         df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)
         
-        # Le reste de votre traitement...
+        return df_ens, None
+        
+    except Exception as e:
+        return None, str(e)
