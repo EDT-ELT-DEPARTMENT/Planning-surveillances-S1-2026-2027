@@ -55,10 +55,17 @@ def init_session_state():
 
 def normaliser_qualite(val):
     val = str(val).strip().lower()
-    mapping = {'permanent': 'Permanent', 'vacataire': 'Vacataire', 'contractuel': 'Contractuel', 'autre': 'Autre',
-               'professeur': 'Permanent', 'charge de cours': 'Vacataire', 'charge_de_cours': 'Vacataire',
-               'doctorant': 'Vacataire', 'maitre de conferences': 'Permanent', 'mc': 'Permanent', 'prof': 'Permanent'}
-    return mapping.get(val, 'Permanent')
+    # Si le texte contient explicitement vacataire ou chargé/charge de cours
+    if 'vacataire' in val or 'charg' in val or 'contractuel' in val or 'doctorant' in val:
+        return 'Vacataire'
+    mapping = {
+        'permanent': 'Permanent', 'vacataire': 'Vacataire', 'contractuel': 'Contractuel', 'autre': 'Autre',
+        'professeur': 'Permanent', 'maitre de conferences': 'Permanent', 'mc': 'Permanent', 'prof': 'Permanent', 'mca': 'Permanent', 'mcb': 'Permanent'
+    }
+    for k, v in mapping.items():
+        if k in val:
+            return v
+    return 'Permanent'
 
 def est_cours(enseignement_str):
     val = str(enseignement_str).strip()
@@ -221,10 +228,8 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
     for i in promo_df.index:
         matiere_nom = promo_df.at[i, 'Enseignements']
         
-        # Gestion du jour personnalisé par matière si défini
         jour_pref = jours_matiere.get(promotion, {}).get(matiere_nom) if jours_matiere else None
         if jour_pref:
-            # Trouver la date correspondante à partir de date_debut correspondant au jour_pref souhaité
             d_test = date_debut
             for _ in range(30):
                 if est_jour_travaille(d_test, jours_feries):
@@ -239,7 +244,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
             date_examen = date_courante
             date_courante += timedelta(days=1)
             
-        # Gestion de l'horaire personnalisé par matière si défini
         creneau_pref = horaires_matiere.get(promotion, {}).get(matiere_nom) if horaires_matiere else None
         creneau = creneau_pref if creneau_pref and creneau_pref in creneaux_dispo else creneaux_dispo[idx % nb_creneaux]
         lieu = lieux[lieu_idx % nb_lieux]
@@ -339,7 +343,6 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                     surveillants.loc[surveillants['nom'] == vac['nom'], 'surveillance_attribuee'] += 1
                     vacataire_trouve = True
                     break
-            # S'il n'y a pas de vacataire disponible, on prend un autre permanent ou autre profil
             if not vacataire_trouve:
                 for _, perm in permanents.iterrows():
                     if perm['nom'] in surveillants_occupes or perm['nom'] in exclus: continue
@@ -350,7 +353,6 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                         surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'] += 1
                         break
 
-        # Complément pour les places supplémentaires si nb_par_lieu > 2
         while len(liste_surveillants) < nb_par_lieu:
             assigned_added = False
             for _, aut in autres.iterrows():
@@ -720,7 +722,7 @@ def main():
                 st.session_state.all_enseignants_list = result['all_enseignants']
                 st.session_state.data_loaded = True
                 if result['promotions']: st.session_state.promo_selected = result['promotions'][0]
-                st.success(f"✅ Chargé: {result['sheet_used']} | {len(result['enseignants'])} ens. | {len(result['examens'])} cours | Promos: {', '.join(result['promotions'])}")
+                st.success(f"✅ Chargé: {result['sheet_used']} | {len(result['enseignants'])} ens. ({len(result['vacataires'])} vacataires) | {len(result['examens'])} cours | Promos: {', '.join(result['promotions'])}")
             else:
                 st.error(f"❌ {error}")
 
@@ -730,6 +732,7 @@ def main():
             st.markdown("### 📁 Source")
             st.success(f"{FICHIER_SOURCE} chargé")
             st.markdown(f"- Enseignants: {len(st.session_state.enseignants_df)}")
+            st.markdown(f"- Vacataires détectés: {len(st.session_state.vacataires_list)}")
             st.markdown(f"- **Cours uniquement**: {len(st.session_state.examens_df)}")
             st.markdown(f"- Promotions: {', '.join(st.session_state.promotions_list)}")
             if st.button("🔄 Recharger", key="btn_reload"):
@@ -777,9 +780,9 @@ def main():
         if st.session_state.data_loaded:
             c1, c2, c3, c4 = st.columns(4)
             with c1: st.metric("Enseignants", len(st.session_state.enseignants_df))
-            with c2: st.metric("Cours filtrés", len(st.session_state.examens_df))
-            with c3: st.metric("Promotions", len(st.session_state.promotions_list))
-            with c4: st.metric("Permanents", len(st.session_state.permanents_list))
+            with c2: st.metric("Vacataires", len(st.session_state.vacataires_list))
+            with c3: st.metric("Cours filtrés", len(st.session_state.examens_df))
+            with c4: st.metric("Promotions", len(st.session_state.promotions_list))
 
     with tabs[1]:
         st.markdown('<div class="sub-header">Gestion des Enseignants et Qualité</div>', unsafe_allow_html=True)
