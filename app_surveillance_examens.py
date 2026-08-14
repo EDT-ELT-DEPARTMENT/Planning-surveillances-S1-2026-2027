@@ -895,7 +895,7 @@ def main():
                 import traceback
                 try:                 
                     generer_planning_promo(
-                        examens_df=df_exam[col],       # Remplacez par le nom de votre variable de DataFrame
+                        examens_df=st.session_state.examens_df,       # Remplacez par le nom de votre variable de DataFrame
                         promotion=selected_promo,     # La variable contenant la promotion choisie (ex: M1ME)
                         date_debut=date_debut,        # La date de début sélectionnée
                         jours_feries=jours_feries,    # La liste des jours fériés
