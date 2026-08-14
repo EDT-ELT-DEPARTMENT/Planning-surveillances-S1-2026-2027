@@ -228,7 +228,7 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
     for i in promo_df.index:
         matiere_nom = promo_df.at[i, 'Enseignements']
         
-        # RÈGLE DOMINANTE : Date fixe et Horaire explicite assignés directement sans alternance
+        # Application stricte de la date personnalisée si elle existe pour cette matière
         date_pref = jours_matiere.get(promotion, {}).get(matiere_nom) if jours_matiere else None
         if date_pref:
             if isinstance(date_pref, datetime):
@@ -824,7 +824,7 @@ def main():
                 <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
-                <li>🕐 <b>Choix de la date fixe et de l'horaire précis par matière</b> (sans alternance indésirable)</li>
+                <li>🕐 <b>Choix de la date fixe et de l'horaire précis par matière</b> (prise en compte prioritaire et exacte)</li>
                 <li>🎉 <b>Sélection des jours fériés depuis le calendrier interactif</b></li>
             </ul>
         </div>
@@ -853,7 +853,6 @@ def main():
     with tabs[2]:
         st.markdown('<div class="sub-header">Planification par Promotion (Génération avec Barre de Progression)</div>', unsafe_allow_html=True)
         
-        # Bouton global de suppression de l'historique demandé
         col_h1, col_h2 = st.columns([1, 4])
         with col_h1:
             if st.button("🗑️ Supprimer l'historique", type="secondary", key="btn_suppr_hist"):
