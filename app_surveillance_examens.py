@@ -434,7 +434,7 @@ def construire_grille_edt(attributions, creneaux_liste):
             if exams:
                 cellules = []
                 for ex in exams:
-                    cell_text = f"📖 {ex['matiere']}\n👤 Chargé: {ex['enseignant']}\n🏫 {ex['lieu']}\n👮\n{ex['surveillants']}"
+                    cell_text = f"📖 {ex['matiere']}\n👤 Promotion: {ex['promotion']}\n👤 Chargé: {ex['enseignant']}\n🏫 {ex['lieu']}\n👮\n{ex['surveillants']}"
                     cellules.append(cell_text)
                 row[jour] = "\n---\n".join(cellules)
             else:
@@ -489,6 +489,7 @@ def generer_html_edt(df_grille, promotion):
         .creneau-cell {{ background-color: #E3F2FD; font-weight: bold; text-align: center; font-size: 12px; width: 120px; }}
         .exam-cell {{ background-color: #FFF8E1; text-align: center; }}
         .matiere {{ font-weight: bold; color: #1565C0; font-size: 12px; text-align: center; }}
+        .promo {{ color: #00796B; font-size: 10px; font-weight: bold; text-align: center; }}
         .ens {{ color: #333; font-size: 10px; text-align: center; }}
         .lieu {{ color: #E65100; font-size: 10px; font-weight: bold; text-align: center; }}
         .surv {{ color: #2E7D32; font-size: 10px; text-align: center; }}
@@ -514,6 +515,7 @@ def generer_html_edt(df_grille, promotion):
                     formatted = []
                     for line in lines:
                         if line.startswith('📖 '): formatted.append(f"<div class='matiere'>{line[2:]}</div>")
+                        elif line.startswith('👤 Promotion: '): formatted.append(f"<div class='promo'>Promotion: {line[14:]}</div>")
                         elif line.startswith('👤 '): formatted.append(f"<div class='ens'>{line[2:]}</div>")
                         elif line.startswith('🏫 '): formatted.append(f"<div class='lieu'>{line[2:]}</div>")
                         elif line.startswith('👮'): formatted.append(f"<div class='surv'>{line}</div>")
@@ -571,6 +573,8 @@ def generer_pdf_edt(attributions, promotion, creneaux_liste):
                     for line in lines:
                         if line.startswith('📖 '):
                             f_lines.append(f"<b>{line}</b>")
+                        elif line.startswith('👤 Promotion: '):
+                            f_lines.append(f"<font color='#00796B'><b>Promotion: {line[14:]}</b></font>")
                         elif line.startswith('👤 '):
                             f_lines.append(f"{line.replace('👤 ', '')}")
                         elif line.startswith('🏫 '):
