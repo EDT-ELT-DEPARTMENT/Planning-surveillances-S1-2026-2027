@@ -88,7 +88,7 @@ def charger_fichier_source_auto():
                 file_path = p
                 break
         if file_path is None:
-            return None, f"Fichier {FICHIER_SOURCE} non trouve"
+            return None, f"Fichier {FICHIER_SOURCE} non trouvé"
         xls = pd.ExcelFile(file_path)
         sheet_names = xls.sheet_names
         ens_sheet = None
@@ -230,7 +230,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
     for i in promo_df.index:
         matiere_nom = promo_df.at[i, 'Enseignements']
         
-        # 1. Récupération de la date personnalisée pour cette matière
         date_pref = jours_matiere.get(promotion, {}).get(matiere_nom) if jours_matiere else None
         if date_pref:
             if isinstance(date_pref, datetime):
@@ -245,7 +244,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
         else:
             d_ex = None
             
-        # 2. Récupération de l'horaire personnalisé pour cette matière
         creneau_pref = horaires_matiere.get(promotion, {}).get(matiere_nom) if horaires_matiere else None
         
         found_slot = False
@@ -256,8 +254,7 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
                 date_examen += timedelta(days=1)
                 
             exams_ce_jour = examens_par_jour_count.get(date_examen, 0)
-            if exams_ce_jour < nb_par_jour or d_ex: # Si date fixe imposée, on autorise l'ajout même si le max journalier est atteint
-                # On teste les créneaux disponibles
+            if exams_ce_jour < nb_par_jour or d_ex:
                 creneaux_a_tester = [creneau_pref] if (creneau_pref and creneau_pref in creneaux_dispo) else creneaux_dispo
                 for c in creneaux_a_tester:
                     if (date_examen, c) not in creneaux_occupes:
@@ -267,7 +264,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
             
             if not found_slot:
                 if d_ex:
-                    # Si la date fixe est saturée, on avance d'un jour pour trouver de la place tout en gardant la priorité
                     date_examen += timedelta(days=1)
                 else:
                     date_examen += timedelta(days=1)
@@ -554,7 +550,7 @@ def generer_pdf_edt(attributions, promotion, creneaux_liste):
     
     df_grille, jours_ordre, _ = construire_grille_edt(attributions, creneaux_liste)
     if df_grille is None:
-        elements.append(Paragraph("Aucune donnee", styles['Normal']))
+        elements.append(Paragraph("Aucune donnée", styles['Normal']))
         doc.build(elements)
         buffer.seek(0)
         return buffer
