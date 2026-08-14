@@ -894,8 +894,16 @@ def main():
             if st.button("Lancer la génération"): # Remplacez par le nom réel de votre bouton s'il diffère
                 import traceback
                 try:
-                    # Mettez ici votre appel de fonction réel (ex: generer_planning_promotion(...) ou équivalent)
-                    generer_planning_promo() 
+                    
+                    generer_planning_promo()
+                    generer_planning_promo(
+                        examens_df=df_examens,       # Remplacez par le nom de votre variable de DataFrame
+                        promotion=selected_promo,     # La variable contenant la promotion choisie (ex: M1ME)
+                        date_debut=date_debut,        # La date de début sélectionnée
+                        jours_feries=jours_feries,    # La liste des jours fériés
+                        creneaux=creneaux_choisis,    # Les créneaux horaires sélectionnés dans l'interface
+                        lieux=lieux_choisis           # Les salles/amphis sélectionnés
+                    )
                     st.success("Génération réussie !")
                 except Exception as e:
                     st.error(f"Erreur détaillée : {e}")
