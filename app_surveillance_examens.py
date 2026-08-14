@@ -43,7 +43,8 @@ def init_session_state():
         'enseignants_df': None, 'examens_df': None, 'planning_df': None,
         'surveillance_df': None, 'nb_surv_permanent': 3, 'nb_surv_vacataire': 2,
         'nb_surv_autre': 1, 'nb_surv_par_lieu': 2, 'exclus_manuels': [],
-        'date_debut_val': date(2026, 11, 1), 'jours_feries': [],
+        'date_debut_val': date(2026, 11, 1), 'date_fin_val': date(2026, 11, 20),
+        'max_examens_par_jour': 2, 'jours_feries': [],
         'promo_selected': None, 'data_loaded': False, 'promotions_list': [],
         'permanents_list': [], 'vacataires_list': [], 'all_enseignants_list': [],
         'ordre_matieres': {}, 'lieux_par_promo': {},
@@ -105,7 +106,6 @@ def charger_fichier_source_auto():
         xls = pd.ExcelFile(file_path)
         sheet_names = xls.sheet_names
         
-        # Application de la logique spécifique pour les noms de feuilles ('matières' et 'EDTCE')
         ens_sheet = None
         edt_sheet = None
         for sheet in sheet_names:
@@ -226,10 +226,7 @@ def est_jour_travaille(date_obj, jours_feries):
             return False
     return True
 
-# =============================================================================
-# NOUVELLE LOGIQUE DE GENERATION : UN EXAMEN PAR JOUR
-# =============================================================================
-def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, creneaux, lieux, ordre_matieres=None, horaires_matiere=None, jours_matiere=None):
+def generer_planning_promo(examens_df, promotion, date_debut, date_fin, max_examens_jour, jours_feries, creneaux, lieux, ordre_matieres=None, horaires_matiere=None, jours_matiere=None):
     if examens_df is None or examens_df.empty:
         return None
     promo_df = examens_df[examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()].copy()
@@ -251,58 +248,104 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
         st.error("Veuillez selectionner au moins un creneau.")
         return None
         
-    dates_utilisees = set()
+    creneaux_occupes = set()
+    examens_par_jour_compteur = {}
     lieu_idx = 0
     date_courante = date_debut
-    creneau_idx = 0
 
     for i in promo_df.index:
         matiere_nom = promo_df.at[i, 'Enseignements']
         
-        # --- DATE ---
         date_pref = jours_matiere.get(promotion, {}).get(matiere_nom) if jours_matiere else None
-        
         if date_pref:
             if isinstance(date_pref, datetime):
-                date_examen = date_pref.date()
+                d_ex = date_pref.date()
             elif isinstance(date_pref, date):
-                date_examen = date_pref
+                d_ex = date_pref
             else:
                 try:
-                    date_examen = datetime.strptime(str(date_pref), "%Y-%m-%d").date()
+                    d_ex = datetime.strptime(str(date_pref), "%Y-%m-%d").date()
                 except:
-                    date_examen = date_debut
-            # Ajuste si le jour fixe tombe sur un non-ouvré
-            if not est_jour_travaille(date_examen, jours_feries):
-                st.warning(f"⚠️ Date fixe {date_examen.strftime('%d/%m/%Y')} pour '{matiere_nom}' est non ouvrée → ajustée.")
-                while not est_jour_travaille(date_examen, jours_feries):
-                    date_examen += timedelta(days=1)
+                    d_ex = date_debut
         else:
-            date_examen = date_courante
-            while not est_jour_travaille(date_examen, jours_feries) or date_examen in dates_utilisees:
-                date_examen += timedelta(days=1)
-            date_courante = date_examen + timedelta(days=1)
-        
-        dates_utilisees.add(date_examen)
-        
-        # --- CRENEAU ---
+            d_ex = None
+            
         creneau_pref = horaires_matiere.get(promotion, {}).get(matiere_nom) if horaires_matiere else None
-        if creneau_pref and creneau_pref in creneaux_dispo:
+        
+        if d_ex and creneau_pref:
+            date_examen = d_ex
             creneau = creneau_pref
+        elif d_ex and not creneau_pref:
+            creneau = None
+            for c in creneaux_dispo:
+                if (d_ex, c) not in creneaux_occupes:
+                    creneau = c
+                    break
+            if not creneau:
+                creneau = creneaux_dispo[0]
+            date_examen = d_ex
+        elif not d_ex and creneau_pref:
+            d_test = date_debut
+            found = False
+            while not found:
+                if d_test > date_fin:
+                    break
+                if est_jour_travaille(d_test, jours_feries) and (d_test, creneau_pref) not in creneaux_occupes:
+                    nb_actuel_jour = examens_par_jour_compteur.get(d_test, 0)
+                    if nb_actuel_jour < max_examens_jour:
+                        date_examen = d_test
+                        creneau = creneau_pref
+                        found = True
+                        break
+                d_test += timedelta(days=1)
+            if not found:
+                date_examen = date_debut
+                creneau = creneau_pref
         else:
-            creneau = creneaux_dispo[creneau_idx % len(creneaux_dispo)]
-            creneau_idx += 1
-        
-        # --- LIEU ---
+            d_test = date_courante
+            found = False
+            while not found:
+                if d_test > date_fin:
+                    d_test = date_debut
+                while not est_jour_travaille(d_test, jours_feries):
+                    d_test += timedelta(days=1)
+                    if d_test > date_fin:
+                        d_test = date_debut
+                
+                nb_actuel_jour = examens_par_jour_compteur.get(d_test, 0)
+                if nb_actuel_jour < max_examens_jour:
+                    for c in creneaux_dispo:
+                        if (d_test, c) not in creneaux_occupes:
+                            date_examen = d_test
+                            creneau = c
+                            found = True
+                            break
+                if not found:
+                    d_test += timedelta(days=1)
+                    if d_test > date_fin:
+                        # Si on dépasse la date de fin, on relâche exceptionnellement la contrainte journalière
+                        for c in creneaux_dispo:
+                            if (date_courante, c) not in creneaux_occupes:
+                                date_examen = date_courante
+                                creneau = c
+                                found = True
+                                break
+                        if not found:
+                            date_examen = date_courante
+                            creneau = creneaux_dispo[0]
+                        break
+            date_courante = date_examen
+
+        creneaux_occupes.add((date_examen, creneau))
+        examens_par_jour_compteur[date_examen] = examens_par_jour_compteur.get(date_examen, 0) + 1
         lieu = lieux[lieu_idx % nb_lieux]
-        lieu_idx += 1
         
-        # --- APPLICATION ---
-        mask = (examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom)
-        examens_df.loc[mask, 'date'] = date_examen
-        examens_df.loc[mask, 'Horaire'] = creneau
-        examens_df.loc[mask, 'Jours'] = JOURS_FR.get(date_examen.strftime("%A"), date_examen.strftime("%A"))
-        examens_df.loc[mask, 'Lieu'] = lieu
+        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'date'] = date_examen
+        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Horaire'] = creneau
+        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Jours'] = JOURS_FR.get(date_examen.strftime("%A"), date_examen.strftime("%A"))
+        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Lieu'] = lieu
+        
+        lieu_idx += 1
             
     planning_promo_result = examens_df[examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()].sort_values(by=['date', 'Horaire', 'Lieu'])
     return planning_promo_result
@@ -708,7 +751,6 @@ def generer_excel_colore(attributions):
             'Surveillants': surv_str
         })
     df = pd.DataFrame(data)
-    # Respect strict de la disposition demandée
     cols_order = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Date', 'Surveillants']
     df = df[[c for c in cols_order if c in df.columns]]
     
@@ -832,8 +874,12 @@ def main():
         st.session_state.nb_surv_autre = st.number_input("Autre", 0, 20, st.session_state.nb_surv_autre, key="w_qa")
         st.session_state.nb_surv_par_lieu = st.number_input("Surv. par lieu", 1, 5, st.session_state.nb_surv_par_lieu, key="w_nl")
         st.markdown("---")
-        st.markdown("### 📅 Date de Début")
+        st.markdown("### 📅 Période des Examens")
         st.session_state.date_debut_val = st.date_input("Date début", st.session_state.date_debut_val, key="w_dd")
+        st.session_state.date_fin_val = st.date_input("Date fin", st.session_state.date_fin_val, key="w_df")
+        
+        st.markdown("### 🔢 Charge Journalière")
+        st.session_state.max_examens_par_jour = st.number_input("Max examens par jour", 1, 5, st.session_state.max_examens_par_jour, key="w_max_ex_jour")
         
         st.markdown("### 🎉 Jours Fériés (Calendrier)")
         if 'jours_feries_list' not in st.session_state:
@@ -877,6 +923,7 @@ def main():
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
                 <li>🛠️ <b>Sélection manuelle par matière</b> activée</li>
+                <li>📅 <b>Date de fin des examens & Nombre d'examens par jour</b> configurables</li>
                 <li>🎉 <b>Sélection des jours fériés depuis le calendrier interactif</b></li>
             </ul>
         </div>
@@ -980,7 +1027,19 @@ def main():
                             if st.session_state.planning_df is None:
                                 st.session_state.planning_df = st.session_state.examens_df.copy()
                                 
-                            planning_promo = generer_planning_promo(st.session_state.planning_df, p_item, st.session_state.date_debut_val, st.session_state.jours_feries, CRENEAUX, lieux_sel, ordre, horaires, jours_m)
+                            planning_promo = generer_planning_promo(
+                                st.session_state.planning_df, 
+                                p_item, 
+                                st.session_state.date_debut_val, 
+                                st.session_state.date_fin_val, 
+                                st.session_state.max_examens_par_jour, 
+                                st.session_state.jours_feries, 
+                                CRENEAUX, 
+                                lieux_sel, 
+                                ordre, 
+                                horaires, 
+                                jours_m
+                            )
                             if planning_promo is not None:
                                 st.session_state.planning_df = planning_promo
                                 st.session_state.historique_edt[p_item] = planning_promo[planning_promo['Promotion'].astype(str).str.strip() == str(p_item).strip()].to_dict('records')
@@ -996,7 +1055,6 @@ def main():
                     st.markdown(f"#### 📝 Planning actuel de la promotion sélectionnée : {promo_selected}")
                     planning_display = st.session_state.planning_df[st.session_state.planning_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()].copy()
                     if not planning_display.empty:
-                        # Respect de la disposition demandée : Enseignements, Code, Enseignants, Horaire, Jours, Lieu, Promotion
                         colonnes_ordre = ["Enseignements", "Code", "Enseignants", "Horaire", "Jours", "Lieu", "Promotion"]
                         st.dataframe(planning_display[[c for c in colonnes_ordre if c in planning_display.columns]], use_container_width=True, hide_index=True)
                     else:
@@ -1117,12 +1175,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
