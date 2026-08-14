@@ -35,7 +35,7 @@ SALLES = [f"S{i:02d}" for i in range(1, 18)]
 AMPHIS = [f"A{i:02d}" for i in range(1, 13)]
 CRENEAUX_DEFAUT = ["08h30 - 10h30", "11h00 - 13h00", "13h30 - 15h30"]
 JOURS_FR = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi", "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
-FICHIER_SOURCE = "DATA-ENS-2026-2027_surveillances.xlsx"[cite: 7]
+FICHIER_SOURCE = "DATA-ENS-2026-2027_surveillances.xlsx"
 
 def init_session_state():
     defaults = {
@@ -87,7 +87,7 @@ def charger_fichier_source_auto():
                 file_path = p
                 break
         if file_path is None:
-            return None, f"Fichier {FICHIER_SOURCE} non trouvé"[cite: 7]
+            return None, f"Fichier {FICHIER_SOURCE} non trouvé"
         xls = pd.ExcelFile(file_path)
         sheet_names = xls.sheet_names
         
@@ -509,7 +509,7 @@ def generer_html_edt(df_grille, promotion):
         .surv {{ color: #2E7D32; font-size: 10px; text-align: center; }}
         .sep {{ border-top: 1px dashed #ccc; margin: 4px 0; }}
     </style>
-    <h2 style="color:#1565C0; text-align:center;">{TITRE_PLATEFORME}</h2>[cite: 7]
+    <h2 style="color:#1565C0; text-align:center;">{TITRE_PLATEFORME}</h2>
     <h3 style="color:#333; text-align:center;">Promotion {promotion}</h3>
     <table class="edt-table">
     """
@@ -553,7 +553,7 @@ def generer_pdf_edt(attributions, promotion, creneaux_liste):
     title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=13, textColor=colors.HexColor('#1565C0'), spaceAfter=6, alignment=1)
     subtitle_style = ParagraphStyle('SubTitle', parent=styles['Normal'], alignment=1, fontSize=10, textColor=colors.HexColor('#333333'), spaceAfter=10)
     
-    elements.append(Paragraph(TITRE_PLATEFORME, title_style))[cite: 7]
+    elements.append(Paragraph(TITRE_PLATEFORME, title_style))
     elements.append(Paragraph(f"Promotion {promotion}", subtitle_style))
     elements.append(Spacer(1, 0.2*cm))
     
@@ -652,7 +652,7 @@ def generer_tableau_html(attributions, creneaux_utilises):
         .creneau-cell {{ background-color: #E3F2FD; font-weight: bold; text-align: center; width: 120px; }}
         .examen-cell {{ background-color: #FFF8E1; margin: 2px auto; padding: 5px; border-radius: 3px; border-left: 3px solid #FFA000; font-size: 10px; text-align: center; }}
     </style>
-    <h3 style="color:#1565C0; text-align:center;">{TITRE_PLATEFORME}</h3>[cite: 7]
+    <h3 style="color:#1565C0; text-align:center;">{TITRE_PLATEFORME}</h3>
     <table class="planning-table">
     """
     jours = sorted(planning_par_jour.keys())
@@ -734,7 +734,7 @@ def generer_pdf(attributions):
     elements = []
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=12, textColor=colors.HexColor('#1565C0'), spaceAfter=10, alignment=1)
-    elements.append(Paragraph(TITRE_PLATEFORME, title_style))[cite: 7]
+    elements.append(Paragraph(TITRE_PLATEFORME, title_style))
     elements.append(Paragraph("PLANNING CHRONOLOGIQUE DES SURVEILLANCES", styles['Heading2']))
     elements.append(Spacer(1, 0.3*cm))
     table_data = [['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Date', 'Surveillants']]
@@ -779,7 +779,7 @@ def generer_pdf(attributions):
 
 def main():
     init_session_state()
-    st.markdown(f'<div class="main-header">{TITRE_PLATEFORME}</div>', unsafe_allow_html=True)[cite: 7]
+    st.markdown(f'<div class="main-header">{TITRE_PLATEFORME}</div>', unsafe_allow_html=True)
 
     if not st.session_state.data_loaded:
         with st.spinner("Chargement du fichier source..."):
@@ -801,7 +801,7 @@ def main():
         st.markdown("## ⚙️ Configuration")
         if st.session_state.data_loaded:
             st.markdown("### 📁 Source")
-            st.success(f"{FICHIER_SOURCE} chargé"[cite: 7])
+            st.success(f"{FICHIER_SOURCE} chargé")
             st.markdown(f"- Enseignants: {len(st.session_state.enseignants_df)}")
             st.markdown(f"- Vacataires détectés: {len(st.session_state.vacataires_list)}")
             st.markdown(f"- **Cours uniquement**: {len(st.session_state.examens_df)}")
@@ -813,7 +813,7 @@ def main():
             st.warning("Fichier non chargé")
             fu = st.file_uploader("Charger manuellement", type=['xlsx', 'xls'], key="manual_up")
             if fu is not None:
-                with open(FICHIER_SOURCE, "wb") as f: f.write(fu.getvalue())[cite: 7]
+                with open(FICHIER_SOURCE, "wb") as f: f.write(fu.getvalue())
                 st.session_state.data_loaded = False
                 st.rerun()
         st.markdown("---")
@@ -877,10 +877,10 @@ def main():
     with tabs[0]:
         st.markdown(f"""
         <div class="info-box">
-            <h3>{TITRE_PLATEFORME}</h3>[cite: 7]
+            <h3>{TITRE_PLATEFORME}</h3>
             <p><strong>Gestion des plannings d'examens et surveillances</strong> | Filtre: <b>Cours uniquement</b></p>
             <ul>
-                <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>[cite: 7]
+                <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>⏰ <b>Créneaux par défaut intégrés en permanence dans la colonne Horaire</b></li>
                 <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
