@@ -91,6 +91,7 @@ def charger_fichier_source_auto():
         xls = pd.ExcelFile(file_path)
         sheet_names = xls.sheet_names
         
+        # Priorité aux feuilles 'matières' ou 'EDTCE' si présentes
         ens_sheet = None
         for preferred in ['matières', 'EDTCE']:
             if preferred in sheet_names:
@@ -817,7 +818,7 @@ def main():
                 st.rerun()
         st.markdown("---")
         st.markdown("### ⏰ Créneaux Horaires Actifs")
-        creneaux choisis = st.multiselect(
+        creneaux_choisis = st.multiselect(
             "Sélectionner 1, 2 ou 3 créneaux",
             CRENEAUX_DEFAUT,
             default=st.session_state.creneaux_actifs,
