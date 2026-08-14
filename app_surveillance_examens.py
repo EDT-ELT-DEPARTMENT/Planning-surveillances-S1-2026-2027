@@ -212,44 +212,75 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
     else:
         promo_df = promo_df.sort_values('Enseignements')
         
-    date_courante = date_debut
     nb_lieux = len(lieux)
     if nb_lieux == 0:
         st.error("Veuillez selectionner au moins un lieu.")
         return None
     creneaux_dispo = creneaux if creneaux else CRENEAUX
-    nb_creneaux = len(creneaux_dispo)
-    if nb_creneaux == 0:
+    if len(creneaux_dispo) == 0:
         st.error("Veuillez selectionner au moins un creneau.")
         return None
         
+    creneaux_occupes = set()
     lieu_idx = 0
-    creneau_idx = 0
-    
+    date_courante = date_debut
+
     for i in promo_df.index:
         matiere_nom = promo_df.at[i, 'Enseignements']
         
+        # Récupération de la date fixe si configurée
         date_pref = jours_matiere.get(promotion, {}).get(matiere_nom) if jours_matiere else None
         if date_pref:
             if isinstance(date_pref, datetime):
-                date_examen = date_pref.date()
+                d_ex = date_pref.date()
+            elif isinstance(date_pref, date):
+                d_ex = date_pref
             else:
-                date_examen = date_pref
+                try:
+                    d_ex = datetime.strptime(str(date_pref), "%Y-%m-%d").date()
+                except:
+                    d_ex = date_debut
         else:
-            while not est_jour_travaille(date_courante, jours_feries):
-                date_courante += timedelta(days=1)
-            date_examen = date_courante
+            d_ex = None
             
+        # Récupération de l'horaire fixe si configuré
         creneau_pref = horaires_matiere.get(promotion, {}).get(matiere_nom) if horaires_matiere else None
-        if creneau_pref:
+        
+        if d_ex and creneau_pref:
+            date_examen = d_ex
+            creneau = creneau_pref
+        elif d_ex and not creneau_pref:
+            creneau = None
+            for c in creneaux_dispo:
+                if (d_ex, c) not in creneaux_occupes:
+                    creneau = c
+                    break
+            if not creneau:
+                creneau = creneaux_dispo[0]
+            date_examen = d_ex
+        elif not d_ex and creneau_pref:
+            d_test = date_debut
+            while not est_jour_travaille(d_test, jours_feries) or (d_test, creneau_pref) in creneaux_occupes:
+                d_test += timedelta(days=1)
+            date_examen = d_test
             creneau = creneau_pref
         else:
-            creneau = creneaux_dispo[creneau_idx % nb_creneaux]
-            creneau_idx += 1
-            if creneau_idx % nb_creneaux == 0:
-                if not date_pref:
-                    date_courante += timedelta(days=1)
+            d_test = date_courante
+            found = False
+            while not found:
+                while not est_jour_travaille(d_test, jours_feries):
+                    d_test += timedelta(days=1)
+                for c in creneaux_dispo:
+                    if (d_test, c) not in creneaux_occupes:
+                        date_examen = d_test
+                        creneau = c
+                        found = True
+                        break
+                if not found:
+                    d_test += timedelta(days=1)
+            date_courante = date_examen
 
+        creneaux_occupes.add((date_examen, creneau))
         lieu = lieux[lieu_idx % nb_lieux]
         
         examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'date'] = date_examen
@@ -1013,7 +1044,6 @@ def main():
     with tabs[5]:
         st.markdown('<div class="sub-header">📂 Répertoire des EDTs & Téléchargements (Individuel & Groupé)</div>', unsafe_allow_html=True)
         
-        # Compteur numérique des EDTs générés par rapport au total (23)
         nb_generes = len(st.session_state.historique_edt) if 'historique_edt' in st.session_state else 0
         total_promos_attendu = 23
         
@@ -1031,7 +1061,6 @@ def main():
             st.markdown("### 📥 Téléchargement Groupé de tous les EDTs")
             col_g1, col_g2 = st.columns(2)
             with col_g1:
-                # Fichier global global sous forme Excel ou HTML groupé
                 st.download_button("⬇️ Télécharger le Planning Global Excel", generer_excel_colore(st.session_state.surveillance_df), "Planning_Global_Toutes_Promotions.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="btn_group_excel")
             with col_g2:
                 st.download_button("⬇️ Télécharger le Planning Global PDF", generer_pdf(st.session_state.surveillance_df), "Planning_Global_Toutes_Promotions.pdf", "application/pdf", key="btn_group_pdf")
