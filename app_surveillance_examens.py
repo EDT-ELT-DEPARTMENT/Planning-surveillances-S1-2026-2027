@@ -150,14 +150,15 @@ def charger_fichier_source_auto():
                         'ordre': 999
                     })
         df_exam = pd.DataFrame(examens_data)
+        if not df_exam.empty:
+            df_exam.columns = [str(c).strip() for c in df_exam.columns]
         df_exam = df_exam.drop_duplicates(subset=['Enseignements', 'Promotion', 'Enseignants']).copy()
         df_exam = df_exam.sort_values('Enseignants').drop_duplicates(subset=['Enseignements', 'Promotion'], keep='first').copy()
         df_ens['nb_surveillance'] = 0
         df_ens['surveillance_attribuee'] = 0
-        promotions = sorted(df_exam['Promotion'].dropna().astype(str).str.strip().unique().tolist())
+        promotions = sorted(df_exam['Promotion'].dropna().astype(str).str.strip().unique().tolist()) if not df_exam.empty else []
         promotions = [p for p in promotions if p != '']
         
-        # Permanent en tête pour la liste des enseignants
         df_ens['is_perm'] = df_ens['qualite'].apply(lambda x: 0 if x == 'Permanent' else 1)
         df_ens = df_ens.sort_values(['is_perm', 'nom']).drop(columns=['is_perm'])
         
@@ -242,7 +243,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
         if creneau == creneaux_dispo[-1]:
             date_courante += timedelta(days=1)
             
-    # Tri chronologique global de l'EDT
     examens_df = examens_df.sort_values(by=['date', 'Horaire', 'Promotion', 'Lieu'])
     return examens_df
 
@@ -253,7 +253,6 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
     surveillants['surveillance_attribuee'] = 0
     exclus = st.session_state.get('exclus_manuels', [])
     
-    # Permanents en tête pour l'attribution
     surveillants['is_perm'] = surveillants['qualite'].apply(lambda x: 0 if x == 'Permanent' else 1)
     surveillants = surveillants.sort_values(['is_perm', 'surveillance_attribuee'])
     
@@ -262,8 +261,6 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
     autres = surveillants[(~surveillants['qualite'].isin(['Permanent', 'Vacataire'])) & (~surveillants['nom'].isin(exclus))].copy().sort_values('surveillance_attribuee')
     
     attributions = []
-    
-    # Suivi pour éviter la double assignation du chargé de matière sur la même matière multi-lieux au même créneau
     charges_affectees_creneau = set()
 
     for idx, examen in planning_df.iterrows():
@@ -294,7 +291,6 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                     
         liste_surveillants = []
         
-        # Chargé de matière explicité (avec contrôle anti-double assignation multi-lieux)
         cle_multi_lieux = (date_examen, creneau_examen, matiere_examen, enseignant_matiere)
         if enseignant_matiere and str(enseignant_matiere) not in ['nan', '', 'None']:
             if cle_multi_lieux not in charges_affectees_creneau:
@@ -312,7 +308,6 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                             surveillants.loc[surveillants['nom'] == nom_ens, 'surveillance_attribuee'] += 1
                             charges_affectees_creneau.add(cle_multi_lieux)
                             
-        # Ajout des permanents en tête
         for _, perm in permanents.iterrows():
             if len(liste_surveillants) >= nb_par_lieu: break
             if perm['nom'] in surveillants_occupes or perm['nom'] in exclus: continue
@@ -349,7 +344,6 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
             'surveillants': [s['nom'] for s in liste_surveillants], 'details_surveillants': liste_surveillants
         })
         
-    # Tri chronologique des attributions
     attributions = sorted(attributions, key=lambda x: (x.get('date', datetime.min), x.get('creneau', ''), x.get('promotion', '')))
     return attributions, surveillants
 
@@ -652,7 +646,6 @@ def generer_pdf(attributions):
         else:
             date_str = str(date_val)
             jour = ''
-        # CORRECTION DE LA PARENTHÈSE ICI : {s['qualite']} au lieu de {s['qualite'])
         surv_str = ", ".join([f"{s['nom']} ({s['qualite']})" for s in attr.get('details_surveillants', [])])
         table_data.append([
             attr.get('matiere', ''), 
@@ -764,8 +757,17 @@ def main():
             with c3: st.metric("Promotions", len(st.session_state.promotions_list))
             with c4: st.metric("Permanents", len(st.session_state.permanents_list))
             with st.expander("👁️ Aperçu des Cours extraits"):
-                preview_df = st.session_state.examens_df[['Enseignements', 'Code', 'Enseignants', 'Promotion']].head(20)
-                if not preview_df.empty: st.dataframe(preview_df, use_container_width=True, hide_index=True)
+                if st.session_state.examens_df is not None and not st.session_state.examens_df.empty:
+                    # Uniformisation robuste des noms de colonnes pour l'affichage (évite tout KeyError)
+                    cols_dispo = {c.lower(): c for c in st.session_state.examens_df.columns}
+                    col_ens = cols_dispo.get('enseignements', cols_dispo.get('enseignement', list(st.session_state.examens_df.columns)[0]))
+                    col_code = cols_dispo.get('code', list(st.session_state.examens_df.columns)[1] if len(st.session_state.examens_df.columns) > 1 else col_ens)
+                    col_prof = cols_dispo.get('enseignants', cols_dispo.get('enseignant', list(st.session_state.examens_df.columns)[2] if len(st.session_state.examens_df.columns) > 2 else col_ens))
+                    col_promo = cols_dispo.get('promotion', list(st.session_state.examens_df.columns)[-1])
+                    
+                    preview_df = st.session_state.examens_df[[col_ens, col_code, col_prof, col_promo]].copy()
+                    preview_df.columns = ['Enseignements', 'Code', 'Enseignants', 'Promotion']
+                    st.dataframe(preview_df.head(20), use_container_width=True, hide_index=True)
 
     with tabs[1]:
         st.markdown('<div class="sub-header">Gestion des Enseignants (Permanents en tête)</div>', unsafe_allow_html=True)
