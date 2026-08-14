@@ -59,26 +59,11 @@ def enlever_accents(input_str):
     return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
 
 def normaliser_qualite(val):
-    val_clean = enlever_accents(str(val)).strip().lower()
-    if any(k in val_clean for k in ['vac', 'charg', 'contract', 'doctorant', 'assoc', 'extern', 'temp']):
+    val_clean = str(val).strip().lower()
+    # On cherche explicitement le mot vacataire peu importe les majuscules/accents
+    if 'vacataire' in val_clean or 'vac' in val_clean:
         return 'Vacataire'
-    mapping = {
-        'permanent': 'Permanent', 'vacataire': 'Vacataire', 'contractuel': 'Contractuel', 'autre': 'Autre',
-        'professeur': 'Permanent', 'maitre de conferences': 'Permanent', 'mc': 'Permanent', 'prof': 'Permanent', 'mca': 'Permanent', 'mcb': 'Permanent'
-    }
-    for k, v in mapping.items():
-        if k in val_clean:
-            return v
     return 'Permanent'
-
-def est_cours(enseignement_str):
-    val = str(enseignement_str).strip()
-    return bool(re.match(r'^[Cc][Oo][Uu][Rr][Ss]', val))
-
-def extraire_nom_cours(enseignement_str):
-    val = str(enseignement_str).strip()
-    nom = re.sub(r'^[Cc][Oo][Uu][Rr][Ss][ \-_:]+', '', val).strip()
-    return nom if nom else val
 
 def charger_fichier_source_auto():
     try:
@@ -95,22 +80,23 @@ def charger_fichier_source_auto():
             return None, f"Fichier {FICHIER_SOURCE} non trouve"
         xls = pd.ExcelFile(file_path)
         sheet_names = xls.sheet_names
-        ens_sheet = None
-        for sheet in sheet_names:
-            df_test = pd.read_excel(file_path, sheet_name=sheet, nrows=5)
-            cols_lower = [enlever_accents(str(c)).lower().strip() for c in df_test.columns]
-            has_qualite = any('qualite' in c or 'quality' in c or 'statut' in c or 'grade' in c for c in cols_lower)
-            has_enseignements = any('enseignement' in c or 'cours' in c or 'matiere' in c or 'module' in c for c in cols_lower)
-            has_nom = any('nom' in c or 'name' in c or 'enseignant' in c for c in cols_lower)
-            if has_qualite and has_enseignements and has_nom:
-                ens_sheet = sheet
-                break
-        if ens_sheet is None and len(sheet_names) > 0:
-            ens_sheet = sheet_names[0]
+        ens_sheet = sheet_names[0] if len(sheet_names) > 0 else None
+        
         df_ens = pd.read_excel(file_path, sheet_name=ens_sheet)
         df_ens.columns = [str(col).strip() for col in df_ens.columns]
+        
+        # Identification automatique de la colonne Qualité par son contenu si le nom ne correspond pas
+        col_qualite_trouvee = None
+        for col in df_ens.columns:
+            # Si la colonne contient les mots 'Vacataire' ou 'Permanent' dans ses premières lignes
+            echantillon = df_ens[col].dropna().astype(str).str.lower().tolist()
+            if any('vacataire' in x for x in echantillon):
+                col_qualite_trouvee = col
+                break
+                
         cols_orig = list(df_ens.columns)
         cols_lower = [enlever_accents(c).lower().strip().replace(' ', '_').replace('-', '_') for c in cols_orig]
+        
         col_map = {}
         for i, c in enumerate(cols_lower):
             if any(x in c for x in ['nom', 'name', 'enseignant', 'prenom_nom', 'nom_prenom', 'professeur']):
@@ -121,24 +107,25 @@ def charger_fichier_source_auto():
                 col_map['enseignements'] = cols_orig[i]
             elif any(x in c for x in ['promotion', 'niveau', 'annee', 'class', 'promo', 'niveaux']):
                 col_map['promotion'] = cols_orig[i]
+                
+        # Si la colonne qualité n'a pas été trouvée par son nom, on force celle détectée par son contenu
+        if col_qualite_trouvee and ('qualite' not in col_map or not col_map['qualite']):
+            col_map['qualite'] = col_qualite_trouvee
+
         rename_map = {}
         if 'nom' in col_map: rename_map[col_map['nom']] = 'nom'
         if 'qualite' in col_map: rename_map[col_map['qualite']] = 'qualite'
         if 'enseignements' in col_map: rename_map[col_map['enseignements']] = 'enseignements'
         if 'promotion' in col_map: rename_map[col_map['promotion']] = 'promotion'
+        
         df_ens = df_ens.rename(columns=rename_map)
-        if 'nom' not in df_ens.columns:
-            for col in df_ens.columns:
-                if df_ens[col].dtype == 'object':
-                    sample = df_ens[col].dropna().astype(str)
-                    if len(sample) > 0 and sample.str.len().mean() > 3:
-                        df_ens['nom'] = df_ens[col]
-                        break
+        
         for col in ['qualite', 'enseignements', 'promotion']:
             if col not in df_ens.columns:
                 df_ens[col] = ''
+                
         df_ens = df_ens[df_ens['nom'].notna() & (df_ens['nom'].astype(str).str.strip() != '')].copy()
-        df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)
+        df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)      
         examens_data = []
         for _, row in df_ens.iterrows():
             raw_ens = str(row.get('enseignements', ''))
