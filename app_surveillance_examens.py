@@ -67,6 +67,19 @@ def normaliser_qualite(val):
             return v
     return 'Permanent'
 
+def corriger_nom_enseignant(nom_str):
+    nom_clean = str(nom_str).strip()
+    nom_lower = nom_clean.lower()
+    corrections = {
+        'belhadj': 'Belabed',
+        'zeghdoudi': 'ZEGHOUDI',
+        'babali': 'Bahlil'
+    }
+    for k, v in corrections.items():
+        if k in nom_lower:
+            return v
+    return nom_clean
+
 def est_cours(enseignement_str):
     val = str(enseignement_str).strip()
     return bool(re.match(r'^[Cc][Oo][Uu][Rr][Ss]', val))
@@ -91,18 +104,30 @@ def charger_fichier_source_auto():
             return None, f"Fichier {FICHIER_SOURCE} non trouve"
         xls = pd.ExcelFile(file_path)
         sheet_names = xls.sheet_names
+        
+        # Application de la logique spécifique pour les noms de feuilles ('matières' et 'EDTCE')
         ens_sheet = None
+        edt_sheet = None
         for sheet in sheet_names:
-            df_test = pd.read_excel(file_path, sheet_name=sheet, nrows=5)
-            cols_lower = [str(c).lower().strip() for c in df_test.columns]
-            has_qualite = any('qualite' in c or 'quality' in c or 'statut' in c or 'grade' in c for c in cols_lower)
-            has_enseignements = any('enseignement' in c or 'cours' in c or 'matiere' in c or 'module' in c for c in cols_lower)
-            has_nom = any('nom' in c or 'name' in c or 'enseignant' in c for c in cols_lower)
-            if has_qualite and has_enseignements and has_nom:
+            s_lower = sheet.strip().lower()
+            if s_lower in ['matières', 'matieres']:
                 ens_sheet = sheet
-                break
+            elif s_lower in ['edtce', 'ce', 'emploi_du_temps']:
+                edt_sheet = sheet
+
+        if ens_sheet is None:
+            for sheet in sheet_names:
+                df_test = pd.read_excel(file_path, sheet_name=sheet, nrows=5)
+                cols_lower = [str(c).lower().strip() for c in df_test.columns]
+                has_qualite = any('qualite' in c or 'quality' in c or 'statut' in c or 'grade' in c for c in cols_lower)
+                has_enseignements = any('enseignement' in c or 'cours' in c or 'matiere' in c or 'module' in c for c in cols_lower)
+                has_nom = any('nom' in c or 'name' in c or 'enseignant' in c for c in cols_lower)
+                if has_qualite and has_enseignements and has_nom:
+                    ens_sheet = sheet
+                    break
         if ens_sheet is None and len(sheet_names) > 0:
             ens_sheet = sheet_names[0]
+
         df_ens = pd.read_excel(file_path, sheet_name=ens_sheet)
         df_ens.columns = [str(col).strip() for col in df_ens.columns]
         cols_orig = list(df_ens.columns)
@@ -135,6 +160,8 @@ def charger_fichier_source_auto():
                 df_ens[col] = ''
         df_ens = df_ens[df_ens['nom'].notna() & (df_ens['nom'].astype(str).str.strip() != '')].copy()
         df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)
+        df_ens['nom'] = df_ens['nom'].apply(corriger_nom_enseignant)
+        
         examens_data = []
         for _, row in df_ens.iterrows():
             raw_ens = str(row.get('enseignements', ''))
@@ -171,7 +198,7 @@ def charger_fichier_source_auto():
         vacataires = df_ens[df_ens['qualite'] == 'Vacataire']['nom'].dropna().unique().tolist()
         all_ens = df_ens['nom'].dropna().unique().tolist()
         return {'enseignants': df_ens, 'examens': df_exam, 'promotions': promotions,
-                'permanents': permanents, 'vacataires': vacataires, 'all_enseignants': all_ens, 'sheet_used': ens_sheet}, None
+                'permanents': permanents, 'vacataires': vacataires, 'all_enseignants': all_ens, 'sheet_used': ens_sheet, 'edt_sheet': edt_sheet}, None
     except Exception as e:
         return None, str(e)
 
@@ -692,6 +719,7 @@ def generer_excel_colore(attributions):
             'Surveillants': surv_str
         })
     df = pd.DataFrame(data)
+    # Respect strict de la disposition demandée
     cols_order = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Date', 'Surveillants']
     df = df[[c for c in cols_order if c in df.columns]]
     
@@ -856,7 +884,7 @@ def main():
             <h3>{TITRE_PLATEFORME}</h3>
             <p><strong>Gestion des plannings d'examens et surveillances</strong> | Filtre: <b>Cours uniquement</b></p>
             <ul>
-                <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
+                <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code> (Feuille <code>matières</code> prioritaire)</li>
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
                 <li>🛠️ <b>Sélection manuelle par matière</b> activée</li>
