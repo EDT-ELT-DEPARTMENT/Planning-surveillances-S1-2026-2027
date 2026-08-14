@@ -15,7 +15,7 @@ import os
 import re
 import time
 
-TITRE_PLATEFORME = "Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA"
+TITRE_PLATEFORME = "Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA"[cite: 7]
 
 st.set_page_config(page_title=TITRE_PLATEFORME, page_icon="📋", layout="wide", initial_sidebar_state="expanded")
 
@@ -35,7 +35,7 @@ SALLES = [f"S{i:02d}" for i in range(1, 18)]
 AMPHIS = [f"A{i:02d}" for i in range(1, 13)]
 CRENEAUX_DEFAUT = ["08h30 - 10h30", "11h00 - 13h00", "13h30 - 15h30"]
 JOURS_FR = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi", "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
-FICHIER_SOURCE = "DATA-ENS-2026-2027_surveillances.xlsx"
+FICHIER_SOURCE = "DATA-ENS-2026-2027_surveillances.xlsx"[cite: 7]
 
 def init_session_state():
     defaults = {
@@ -87,21 +87,30 @@ def charger_fichier_source_auto():
                 file_path = p
                 break
         if file_path is None:
-            return None, f"Fichier {FICHIER_SOURCE} non trouvé"
+            return None, f"Fichier {FICHIER_SOURCE} non trouvé"[cite: 7]
         xls = pd.ExcelFile(file_path)
         sheet_names = xls.sheet_names
+        
+        # Priorité aux feuilles 'matières' ou 'EDTCE' si présentes
         ens_sheet = None
-        for sheet in sheet_names:
-            df_test = pd.read_excel(file_path, sheet_name=sheet, nrows=5)
-            cols_lower = [str(c).lower().strip() for c in df_test.columns]
-            has_qualite = any('qualite' in c or 'quality' in c or 'statut' in c or 'grade' in c for c in cols_lower)
-            has_enseignements = any('enseignement' in c or 'cours' in c or 'matiere' in c or 'module' in c for c in cols_lower)
-            has_nom = any('nom' in c or 'name' in c or 'enseignant' in c for c in cols_lower)
-            if has_qualite and has_enseignements and has_nom:
-                ens_sheet = sheet
+        for preferred in ['matières', 'EDTCE']:
+            if preferred in sheet_names:
+                ens_sheet = preferred
                 break
+                
+        if not ens_sheet:
+            for sheet in sheet_names:
+                df_test = pd.read_excel(file_path, sheet_name=sheet, nrows=5)
+                cols_lower = [str(c).lower().strip() for c in df_test.columns]
+                has_qualite = any('qualite' in c or 'quality' in c or 'statut' in c or 'grade' in c for c in cols_lower)
+                has_enseignements = any('enseignement' in c or 'cours' in c or 'matiere' in c or 'module' in c for c in cols_lower)
+                has_nom = any('nom' in c or 'name' in c or 'enseignant' in c for c in cols_lower)
+                if has_qualite and has_enseignements and has_nom:
+                    ens_sheet = sheet
+                    break
         if ens_sheet is None and len(sheet_names) > 0:
             ens_sheet = sheet_names[0]
+            
         df_ens = pd.read_excel(file_path, sheet_name=ens_sheet)
         df_ens.columns = [str(col).strip() for col in df_ens.columns]
         cols_orig = list(df_ens.columns)
@@ -182,6 +191,8 @@ def est_jour_travaille(date_obj, jours_feries):
             date_obj = datetime.strptime(date_obj, "%Y-%m-%d").date()
         except:
             return True
+    if not isinstance(date_obj, date):
+        return True
     jour_semaine = date_obj.strftime("%A")
     jour_fr = JOURS_FR.get(jour_semaine, jour_semaine)
     if jour_fr in ["Vendredi", "Samedi"]:
@@ -264,10 +275,7 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
                         break
             
             if not found_slot:
-                if d_ex:
-                    date_examen += timedelta(days=1)
-                else:
-                    date_examen += timedelta(days=1)
+                date_examen += timedelta(days=1)
 
         creneaux_occupes.add((date_examen, creneau))
         examens_par_jour_count[date_examen] = examens_par_jour_count.get(date_examen, 0) + 1
@@ -313,8 +321,8 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
         for attr in attributions:
             attr_date = attr.get('date', None)
             if attr_date is not None and attr.get('creneau') == creneau_examen:
-                d1 = attr_date.date() if hasattr(attr_date, 'date') else attr_date
-                d2 = date_examen.date() if hasattr(date_examen, 'date') else date_examen
+                d1 = attr_date.date() if isinstance(attr_date, datetime) else attr_date
+                d2 = date_examen.date() if isinstance(date_examen, datetime) else date_examen
                 if isinstance(d1, str):
                     try: d1 = datetime.strptime(d1, "%Y-%m-%d").date()
                     except: d1 = None
@@ -501,7 +509,7 @@ def generer_html_edt(df_grille, promotion):
         .surv {{ color: #2E7D32; font-size: 10px; text-align: center; }}
         .sep {{ border-top: 1px dashed #ccc; margin: 4px 0; }}
     </style>
-    <h2 style="color:#1565C0; text-align:center;">{TITRE_PLATEFORME}</h2>
+    <h2 style="color:#1565C0; text-align:center;">{TITRE_PLATEFORME}</h2>[cite: 7]
     <h3 style="color:#333; text-align:center;">Promotion {promotion}</h3>
     <table class="edt-table">
     """
@@ -545,7 +553,7 @@ def generer_pdf_edt(attributions, promotion, creneaux_liste):
     title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=13, textColor=colors.HexColor('#1565C0'), spaceAfter=6, alignment=1)
     subtitle_style = ParagraphStyle('SubTitle', parent=styles['Normal'], alignment=1, fontSize=10, textColor=colors.HexColor('#333333'), spaceAfter=10)
     
-    elements.append(Paragraph(TITRE_PLATEFORME, title_style))
+    elements.append(Paragraph(TITRE_PLATEFORME, title_style))[cite: 7]
     elements.append(Paragraph(f"Promotion {promotion}", subtitle_style))
     elements.append(Spacer(1, 0.2*cm))
     
@@ -644,7 +652,7 @@ def generer_tableau_html(attributions, creneaux_utilises):
         .creneau-cell {{ background-color: #E3F2FD; font-weight: bold; text-align: center; width: 120px; }}
         .examen-cell {{ background-color: #FFF8E1; margin: 2px auto; padding: 5px; border-radius: 3px; border-left: 3px solid #FFA000; font-size: 10px; text-align: center; }}
     </style>
-    <h3 style="color:#1565C0; text-align:center;">{TITRE_PLATEFORME}</h3>
+    <h3 style="color:#1565C0; text-align:center;">{TITRE_PLATEFORME}</h3>[cite: 7]
     <table class="planning-table">
     """
     jours = sorted(planning_par_jour.keys())
@@ -726,7 +734,7 @@ def generer_pdf(attributions):
     elements = []
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=12, textColor=colors.HexColor('#1565C0'), spaceAfter=10, alignment=1)
-    elements.append(Paragraph(TITRE_PLATEFORME, title_style))
+    elements.append(Paragraph(TITRE_PLATEFORME, title_style))[cite: 7]
     elements.append(Paragraph("PLANNING CHRONOLOGIQUE DES SURVEILLANCES", styles['Heading2']))
     elements.append(Spacer(1, 0.3*cm))
     table_data = [['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Date', 'Surveillants']]
@@ -771,7 +779,7 @@ def generer_pdf(attributions):
 
 def main():
     init_session_state()
-    st.markdown(f'<div class="main-header">{TITRE_PLATEFORME}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="main-header">{TITRE_PLATEFORME}</div>', unsafe_allow_html=True)[cite: 7]
 
     if not st.session_state.data_loaded:
         with st.spinner("Chargement du fichier source..."):
@@ -793,7 +801,7 @@ def main():
         st.markdown("## ⚙️ Configuration")
         if st.session_state.data_loaded:
             st.markdown("### 📁 Source")
-            st.success(f"{FICHIER_SOURCE} chargé")
+            st.success(f"{FICHIER_SOURCE} chargé"[cite: 7])
             st.markdown(f"- Enseignants: {len(st.session_state.enseignants_df)}")
             st.markdown(f"- Vacataires détectés: {len(st.session_state.vacataires_list)}")
             st.markdown(f"- **Cours uniquement**: {len(st.session_state.examens_df)}")
@@ -805,7 +813,7 @@ def main():
             st.warning("Fichier non chargé")
             fu = st.file_uploader("Charger manuellement", type=['xlsx', 'xls'], key="manual_up")
             if fu is not None:
-                with open(FICHIER_SOURCE, "wb") as f: f.write(fu.getvalue())
+                with open(FICHIER_SOURCE, "wb") as f: f.write(fu.getvalue())[cite: 7]
                 st.session_state.data_loaded = False
                 st.rerun()
         st.markdown("---")
@@ -869,10 +877,10 @@ def main():
     with tabs[0]:
         st.markdown(f"""
         <div class="info-box">
-            <h3>{TITRE_PLATEFORME}</h3>
+            <h3>{TITRE_PLATEFORME}</h3>[cite: 7]
             <p><strong>Gestion des plannings d'examens et surveillances</strong> | Filtre: <b>Cours uniquement</b></p>
             <ul>
-                <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
+                <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>[cite: 7]
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>⏰ <b>Créneaux par défaut intégrés en permanence dans la colonne Horaire</b></li>
                 <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
