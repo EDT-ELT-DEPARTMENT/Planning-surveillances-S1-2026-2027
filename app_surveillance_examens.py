@@ -606,7 +606,6 @@ def generer_excel_colore(attributions):
             'Surveillants': surv_str
         })
     df = pd.DataFrame(data)
-    # Disposition demandée: Enseignements, Code, Enseignants, Horaire, Jours, Lieu, Promotion
     cols_order = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Date', 'Surveillants']
     df = df[[c for c in cols_order if c in df.columns]]
     
@@ -653,7 +652,8 @@ def generer_pdf(attributions):
         else:
             date_str = str(date_val)
             jour = ''
-        surv_str = ", ".join([f"{s['nom']} ({s['qualite'])" for s in attr.get('details_surveillants', [])])
+        # CORRECTION DE LA PARENTHÈSE ICI : {s['qualite']} au lieu de {s['qualite'])
+        surv_str = ", ".join([f"{s['nom']} ({s['qualite']})" for s in attr.get('details_surveillants', [])])
         table_data.append([
             attr.get('matiere', ''), 
             f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}", 
