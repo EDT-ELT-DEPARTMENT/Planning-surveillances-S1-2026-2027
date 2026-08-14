@@ -13,7 +13,6 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 import os
 import re
-import unicodedata
 
 # Titre officiel rappelé conformément aux consignes
 TITRE_PLATEFORME = "Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA"
@@ -54,20 +53,16 @@ def init_session_state():
         if key not in st.session_state:
             st.session_state[key] = value
 
-def enlever_accents(input_str):
-    nfkd_form = unicodedata.normalize('NFKD', str(input_str))
-    return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
-
 def normaliser_qualite(val):
-    val_clean = enlever_accents(str(val)).strip().lower()
-    if any(k in val_clean for k in ['vac', 'charg', 'contract', 'doctorant', 'assoc', 'extern', 'temp']):
+    val = str(val).strip().lower()
+    if 'vacataire' in val or 'charg' in val or 'contractuel' in val or 'doctorant' in val:
         return 'Vacataire'
     mapping = {
         'permanent': 'Permanent', 'vacataire': 'Vacataire', 'contractuel': 'Contractuel', 'autre': 'Autre',
         'professeur': 'Permanent', 'maitre de conferences': 'Permanent', 'mc': 'Permanent', 'prof': 'Permanent', 'mca': 'Permanent', 'mcb': 'Permanent'
     }
     for k, v in mapping.items():
-        if k in val_clean:
+        if k in val:
             return v
     return 'Permanent'
 
@@ -98,7 +93,7 @@ def charger_fichier_source_auto():
         ens_sheet = None
         for sheet in sheet_names:
             df_test = pd.read_excel(file_path, sheet_name=sheet, nrows=5)
-            cols_lower = [enlever_accents(str(c)).lower().strip() for c in df_test.columns]
+            cols_lower = [str(c).lower().strip() for c in df_test.columns]
             has_qualite = any('qualite' in c or 'quality' in c or 'statut' in c or 'grade' in c for c in cols_lower)
             has_enseignements = any('enseignement' in c or 'cours' in c or 'matiere' in c or 'module' in c for c in cols_lower)
             has_nom = any('nom' in c or 'name' in c or 'enseignant' in c for c in cols_lower)
@@ -110,7 +105,7 @@ def charger_fichier_source_auto():
         df_ens = pd.read_excel(file_path, sheet_name=ens_sheet)
         df_ens.columns = [str(col).strip() for col in df_ens.columns]
         cols_orig = list(df_ens.columns)
-        cols_lower = [enlever_accents(c).lower().strip().replace(' ', '_').replace('-', '_') for c in cols_orig]
+        cols_lower = [c.lower().strip().replace(' ', '_').replace('-', '_') for c in cols_orig]
         col_map = {}
         for i, c in enumerate(cols_lower):
             if any(x in c for x in ['nom', 'name', 'enseignant', 'prenom_nom', 'nom_prenom', 'professeur']):
