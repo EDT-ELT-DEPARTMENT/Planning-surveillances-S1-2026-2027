@@ -58,7 +58,7 @@ def enlever_accents(input_str):
     nfkd_form = unicodedata.normalize('NFKD', str(input_str))
     return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
 
-def normaliser_qualite(val):
+def normaliser_Qualité(val):
     val_clean = str(val).strip().lower()
     if 'vacataire' in val_clean or 'vac' in val_clean:
         return 'Vacataire'
@@ -96,11 +96,11 @@ def charger_fichier_source_auto():
         df_ens = pd.read_excel(file_path, sheet_name=ens_sheet)
         df_ens.columns = [str(col).strip() for col in df_ens.columns]
         
-        col_qualite_trouvee = None
+        col_Qualité_trouvee = None
         for col in df_ens.columns:
             echantillon = df_ens[col].dropna().astype(str).str.lower().tolist()
             if any('vacataire' in x for x in echantillon):
-                col_qualite_trouvee = col
+                col_Qualité_trouvee = col
                 break
                 
         cols_orig = list(df_ens.columns)
@@ -110,30 +110,30 @@ def charger_fichier_source_auto():
         for i, c in enumerate(cols_lower):
             if any(x in c for x in ['nom', 'name', 'enseignant', 'prenom_nom', 'nom_prenom', 'professeur']):
                 col_map['nom'] = cols_orig[i]
-            elif any(x in c for x in ['qualite', 'quality', 'type', 'statut', 'grade', 'categorie', 'situation']):
-                col_map['qualite'] = cols_orig[i]
+            elif any(x in c for x in ['Qualité', 'quality', 'type', 'statut', 'grade', 'categorie', 'situation']):
+                col_map['Qualité'] = cols_orig[i]
             elif any(x in c for x in ['enseignement', 'cours', 'matiere', 'module', 'discipline', 'ue', 'matieres', 'enseignements']):
                 col_map['enseignements'] = cols_orig[i]
             elif any(x in c for x in ['promotion', 'niveau', 'annee', 'class', 'promo', 'niveaux']):
                 col_map['promotion'] = cols_orig[i]
                 
-        if col_qualite_trouvee and ('qualite' not in col_map or not col_map['qualite']):
-            col_map['qualite'] = col_qualite_trouvee
+        if col_Qualité_trouvee and ('Qualité' not in col_map or not col_map['Qualité']):
+            col_map['Qualité'] = col_Qualité_trouvee
 
         rename_map = {}
         if 'nom' in col_map: rename_map[col_map['nom']] = 'nom'
-        if 'qualite' in col_map: rename_map[col_map['qualite']] = 'qualite'
+        if 'Qualité' in col_map: rename_map[col_map['Qualité']] = 'Qualité'
         if 'enseignements' in col_map: rename_map[col_map['enseignements']] = 'ContenuMatière' # Mis à jour conformément aux directives
         if 'promotion' in col_map: rename_map[col_map['promotion']] = 'promotion'
         
         df_ens = df_ens.rename(columns=rename_map)
         
-        for col in ['qualite', 'ContenuMatière', 'promotion']:
+        for col in ['Qualité', 'ContenuMatière', 'promotion']:
             if col not in df_ens.columns:
                 df_ens[col] = ''
                 
         df_ens = df_ens[df_ens['nom'].notna() & (df_ens['nom'].astype(str).str.strip() != '')].copy()
-        df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)      
+        df_ens['Qualité'] = df_ens['Qualité'].apply(normaliser_Qualité)      
         examens_data = []
         for _, row in df_ens.iterrows():
             raw_ens = str(row.get('ContenuMatière', ''))
@@ -147,7 +147,7 @@ def charger_fichier_source_auto():
                         'Enseignements': nom_cours, 
                         'Code': code_cours,
                         'Enseignants': str(row.get('nom', '')).strip(), 
-                        'qualite_ens': row.get('qualite', 'Permanent'),
+                        'Qualité_ens': row.get('Qualité', 'Permanent'),
                         'Horaire': None, 'Jours': None, 'Lieu': None,
                         'Promotion': str(row.get('promotion', '')).strip(),
                         'ordre': 999
@@ -163,11 +163,11 @@ def charger_fichier_source_auto():
         promotions = sorted(df_exam['Promotion'].dropna().astype(str).str.strip().unique().tolist()) if not df_exam.empty else []
         promotions = [p for p in promotions if p != '']
         
-        df_ens['is_perm'] = df_ens['qualite'].apply(lambda x: 0 if x == 'Permanent' else 1)
+        df_ens['is_perm'] = df_ens['Qualité'].apply(lambda x: 0 if x == 'Permanent' else 1)
         df_ens = df_ens.sort_values(['is_perm', 'nom']).drop(columns=['is_perm'])
         
-        permanents = df_ens[df_ens['qualite'] == 'Permanent']['nom'].dropna().unique().tolist()
-        vacataires = df_ens[df_ens['qualite'] == 'Vacataire']['nom'].dropna().unique().tolist()
+        permanents = df_ens[df_ens['Qualité'] == 'Permanent']['nom'].dropna().unique().tolist()
+        vacataires = df_ens[df_ens['Qualité'] == 'Vacataire']['nom'].dropna().unique().tolist()
         all_ens = df_ens['nom'].dropna().unique().tolist()
         return {'enseignants': df_ens, 'examens': df_exam, 'promotions': promotions,
                 'permanents': permanents, 'vacataires': vacataires, 'all_enseignants': all_ens, 'sheet_used': ens_sheet}, None
@@ -266,9 +266,9 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
     surveillants['surveillance_attribuee'] = 0
     exclus = st.session_state.get('exclus_manuels', [])
     
-    permanents = surveillants[(surveillants['qualite'] == 'Permanent') & (~surveillants['nom'].isin(exclus))].copy().sort_values('surveillance_attribuee')
-    vacataires = surveillants[(surveillants['qualite'] == 'Vacataire') & (~surveillants['nom'].isin(exclus))].copy().sort_values('surveillance_attribuee')
-    autres = surveillants[(~surveillants['qualite'].isin(['Permanent', 'Vacataire'])) & (~surveillants['nom'].isin(exclus))].copy().sort_values('surveillance_attribuee')
+    permanents = surveillants[(surveillants['Qualité'] == 'Permanent') & (~surveillants['nom'].isin(exclus))].copy().sort_values('surveillance_attribuee')
+    vacataires = surveillants[(surveillants['Qualité'] == 'Vacataire') & (~surveillants['nom'].isin(exclus))].copy().sort_values('surveillance_attribuee')
+    autres = surveillants[(~surveillants['Qualité'].isin(['Permanent', 'Vacataire'])) & (~surveillants['nom'].isin(exclus))].copy().sort_values('surveillance_attribuee')
     
     attributions = []
     charges_affectees_creneau = set()
@@ -307,13 +307,13 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                 ens_info = surveillants[surveillants['nom'] == enseignant_matiere]
                 if not ens_info.empty:
                     nom_ens = ens_info.iloc[0]['nom']
-                    qualite_ens = ens_info.iloc[0]['qualite']
+                    Qualité_ens = ens_info.iloc[0]['Qualité']
                     if nom_ens not in surveillants_occupes and nom_ens not in exclus:
-                        quota_key = f"nb_surv_{qualite_ens.lower()}"
+                        quota_key = f"nb_surv_{Qualité_ens.lower()}"
                         quota = st.session_state.get(quota_key, 3)
                         current_count = surveillants.loc[surveillants['nom'] == nom_ens, 'surveillance_attribuee'].values[0]
                         if current_count < quota:
-                            liste_surveillants.append({'nom': nom_ens, 'qualite': qualite_ens, 'priorite': 'Charge de matiere'})
+                            liste_surveillants.append({'nom': nom_ens, 'Qualité': Qualité_ens, 'priorite': 'Charge de matiere'})
                             surveillants_occupes.add(nom_ens)
                             surveillants.loc[surveillants['nom'] == nom_ens, 'surveillance_attribuee'] += 1
                             charges_affectees_creneau.add(cle_multi_lieux)
@@ -324,7 +324,7 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                 quota_perm = st.session_state.get('nb_surv_permanent', 3)
                 current_count = surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'].values[0]
                 if current_count < quota_perm:
-                    liste_surveillants.append({'nom': perm['nom'], 'qualite': 'Permanent', 'priorite': 'Permanent'})
+                    liste_surveillants.append({'nom': perm['nom'], 'Qualité': 'Permanent', 'priorite': 'Permanent'})
                     surveillants_occupes.add(perm['nom'])
                     surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'] += 1
                     break
@@ -336,7 +336,7 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                 quota_vac = st.session_state.get('nb_surv_vacataire', 2)
                 current_count = surveillants.loc[surveillants['nom'] == vac['nom'], 'surveillance_attribuee'].values[0]
                 if current_count < quota_vac:
-                    liste_surveillants.append({'nom': vac['nom'], 'qualite': 'Vacataire', 'priorite': 'Vacataire'})
+                    liste_surveillants.append({'nom': vac['nom'], 'Qualité': 'Vacataire', 'priorite': 'Vacataire'})
                     surveillants_occupes.add(vac['nom'])
                     surveillants.loc[surveillants['nom'] == vac['nom'], 'surveillance_attribuee'] += 1
                     vacataire_trouve = True
@@ -346,7 +346,7 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                     if perm['nom'] in surveillants_occupes or perm['nom'] in exclus: continue
                     current_count = surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'].values[0]
                     if current_count < st.session_state.get('nb_surv_permanent', 3):
-                        liste_surveillants.append({'nom': perm['nom'], 'qualite': 'Permanent', 'priorite': 'Permanent'})
+                        liste_surveillants.append({'nom': perm['nom'], 'Qualité': 'Permanent', 'priorite': 'Permanent'})
                         surveillants_occupes.add(perm['nom'])
                         surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'] += 1
                         break
@@ -357,7 +357,7 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                 if aut['nom'] in surveillants_occupes or aut['nom'] in exclus: continue
                 current_count = surveillants.loc[surveillants['nom'] == aut['nom'], 'surveillance_attribuee'].values[0]
                 if current_count < st.session_state.get('nb_surv_autre', 1):
-                    liste_surveillants.append({'nom': aut['nom'], 'qualite': aut['qualite'], 'priorite': 'Autre'})
+                    liste_surveillants.append({'nom': aut['nom'], 'Qualité': aut['Qualité'], 'priorite': 'Autre'})
                     surveillants_occupes.add(aut['nom'])
                     surveillants.loc[surveillants['nom'] == aut['nom'], 'surveillance_attribuee'] += 1
                     assigned_added = True
@@ -395,7 +395,7 @@ def construire_grille_edt(attributions, creneaux_liste):
         creneau = attr.get('creneau', '')
         if creneau not in grille[cle_jour]: grille[cle_jour][creneau] = []
         survs = attr.get('details_surveillants', [])
-        surv_text = "\n".join([f"• {s['nom']} ({s['qualite']})" for s in survs])
+        surv_text = "\n".join([f"• {s['nom']} ({s['Qualité']})" for s in survs])
         grille[cle_jour][creneau].append({
             'matiere': attr.get('matiere', ''), 
             'enseignant': attr.get('enseignant', ''),
@@ -627,7 +627,7 @@ def generer_tableau_html(attributions):
             if creneau in planning_par_jour.get(jour, {}):
                 for examen in planning_par_jour[jour][creneau]:
                     survs = examen.get('details_surveillants', [])
-                    surv_html = "<br>".join([f"<span>{s['nom']} ({s['qualite']}{'*' if s.get('priorite') == 'Charge de matiere' else ''})</span>" for s in survs])
+                    surv_html = "<br>".join([f"<span>{s['nom']} ({s['Qualité']}{'*' if s.get('priorite') == 'Charge de matiere' else ''})</span>" for s in survs])
                     html += f"<div class='examen-cell'><strong>{examen.get('matiere', '')}</strong><br><small>Promo: {examen.get('promotion', '')} | Lieu: {examen.get('lieu', '')}</small><br><small>Chargé: {examen.get('enseignant', '')}</small><br><small>{surv_html}</small></div>"
             html += "</td>"
         html += "</tr>"
@@ -647,7 +647,7 @@ def generer_excel_colore(attributions):
         else:
             date_str = str(date_val)
             jour = ''
-        surv_str = ", ".join([f"{s['nom']} ({s['qualite']})" for s in attr.get('details_surveillants', [])])
+        surv_str = ", ".join([f"{s['nom']} ({s['Qualité']})" for s in attr.get('details_surveillants', [])])
         data.append({
             'Enseignements': attr.get('matiere', ''), 
             'Code': f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}", 
@@ -706,7 +706,7 @@ def generer_pdf(attributions):
         else:
             date_str = str(date_val)
             jour = ''
-        surv_str = ", ".join([f"{s['nom']} ({s['qualite']})" for s in attr.get('details_surveillants', [])])
+        surv_str = ", ".join([f"{s['nom']} ({s['Qualité']})" for s in attr.get('details_surveillants', [])])
         table_data.append([
             attr.get('matiere', ''), 
             f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}", 
@@ -823,9 +823,9 @@ def main():
             exclus = st.multiselect("Sélectionner les enseignants à EXCLURE", sorted(all_ens), default=st.session_state.exclus_manuels, key="w_exclus")
             st.session_state.exclus_manuels = exclus
             if not df_ens.empty:
-                disp_ens = df_ens[['nom', 'qualite', 'ContenuMatière', 'promotion']].copy()
+                disp_ens = df_ens[['nom', 'Qualité', 'ContenuMatière', 'promotion']].copy()
                 disp_ens['Exclu'] = disp_ens['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
-                disp_ens = disp_ens.sort_values(by=['qualite', 'nom'], ascending=[True, True])
+                disp_ens = disp_ens.sort_values(by=['Qualité', 'nom'], ascending=[True, True])
                 st.dataframe(disp_ens, use_container_width=True, hide_index=True)
         else: st.warning("Données non chargées.")
 
@@ -926,8 +926,8 @@ def main():
                             'Promotion': attr.get('promotion', ''),
                             'Date': ds,
                             'Surveillant': surv['nom'],
-                            'Qualité': surv['qualite'],
-                            'Rôle': 'Chargé de matière' if surv.get('priorite') == 'Charge de matiere' else surv['qualite']
+                            'Qualité': surv['Qualité'],
+                            'Rôle': 'Chargé de matière' if surv.get('priorite') == 'Charge de matiere' else surv['Qualité']
                         })
                 if attr_data:
                     st.dataframe(pd.DataFrame(attr_data), use_container_width=True, hide_index=True)
