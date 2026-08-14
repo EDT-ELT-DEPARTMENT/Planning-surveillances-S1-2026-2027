@@ -119,8 +119,8 @@ def charger_fichier_source_auto():
         rename_map = {}
         if 'nom' in col_map: rename_map[col_map['nom']] = 'nom'
         if 'qualite' in col_map: rename_map[col_map['qualite']] = 'qualite'
-        if 'enseignements' in col_map: rename_map[col_map['enseignements']] = 'enseignements'
-        if 'promotion' in col_map: rename_map[col_map['promotion']] = 'promotion'
+        if 'enseignements' in col_map: rename_map[col_map['enseignements']] = 'Enseignements'
+        if 'promotion' in col_map: rename_map[col_map['promotion']] = 'Promotion'
         df_ens = df_ens.rename(columns=rename_map)
         if 'nom' not in df_ens.columns:
             for col in df_ens.columns:
@@ -129,14 +129,14 @@ def charger_fichier_source_auto():
                     if len(sample) > 0 and sample.str.len().mean() > 3:
                         df_ens['nom'] = df_ens[col]
                         break
-        for col in ['qualite', 'enseignements', 'promotion']:
+        for col in ['qualite', 'Enseignements', 'Promotion']:
             if col not in df_ens.columns:
                 df_ens[col] = ''
         df_ens = df_ens[df_ens['nom'].notna() & (df_ens['nom'].astype(str).str.strip() != '')].copy()
         df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)
         examens_data = []
         for _, row in df_ens.iterrows():
-            raw_ens = str(row.get('enseignements', ''))
+            raw_ens = str(row.get('Enseignements', ''))
             items = re.split(r'[,;/]+', raw_ens)
             for item in items:
                 item = item.strip()
@@ -149,7 +149,7 @@ def charger_fichier_source_auto():
                         'Enseignants': str(row.get('nom', '')).strip(), 
                         'qualite_ens': row.get('qualite', 'Permanent'),
                         'Horaire': CRENEAUX_DEFAUT[0], 'Jours': None, 'Lieu': None,
-                        'Promotion': str(row.get('promotion', '')).strip(),
+                        'Promotion': str(row.get('Promotion', '')).strip(),
                         'ordre': 999
                     })
         df_exam = pd.DataFrame(examens_data)
@@ -202,7 +202,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
     if examens_df is None or examens_df.empty:
         return None
     
-    # Travaillez sur une copie pour éviter des modifications non désirées sur le DataFrame global en cours de route
     df_working = examens_df.copy()
     promo_df = df_working[df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()].copy()
     if promo_df.empty:
@@ -219,7 +218,7 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
     if nb_lieux == 0:
         st.error("Veuillez sélectionner au moins un lieu.")
         return None
-    creneaux_dispo = CRENEAUX_DEFAUT
+    creneaux_dispo = creneaux if creneaux else CRENEAUX_DEFAUT
     if len(creneaux_dispo) == 0:
         st.error("Veuillez sélectionner au moins un créneau.")
         return None
@@ -274,7 +273,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
         examens_par_jour_count[date_examen] = examens_par_jour_count.get(date_examen, 0) + 1
         lieu = lieux[lieu_idx % nb_lieux]
         
-        # Mise à jour directe dans le DataFrame de travail
         df_working.loc[(df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (df_working['Enseignements'] == matiere_nom), 'date'] = date_examen
         df_working.loc[(df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (df_working['Enseignements'] == matiere_nom), 'Horaire'] = creneau
         df_working.loc[(df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (df_working['Enseignements'] == matiere_nom), 'Jours'] = JOURS_FR.get(date_examen.strftime("%A"), date_examen.strftime("%A"))
@@ -398,7 +396,8 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
             'surveillants': [s['nom'] for s in liste_surveillants], 'details_surveillants': liste_surveillants
         })
         
-    attributions = sorted(attributions, key=lambda x: (x.get('date', datetime.min), x.get('creneau', CRENEAUX_DEFAUT[0]), x.get('promotion', '')))
+    creneaux_actifs = st.session_state.get('creneaux_actifs', CRENEAUX_DEFAUT)
+    attributions = sorted(attributions, key=lambda x: (x.get('date', datetime.min), creneaux_actifs.index(x.get('creneau')) if x.get('creneau') in creneaux_actifs else 0, x.get('promotion', '')))
     return attributions, surveillants
 
 def construire_grille_edt(attributions, creneaux_liste):
@@ -432,7 +431,7 @@ def construire_grille_edt(attributions, creneaux_liste):
             'creneau': creneau,
             'date': date_str
         })
-    creneaux_utilises = CRENEAUX_DEFAUT
+    creneaux_utilises = st.session_state.get('creneaux_actifs', CRENEAUX_DEFAUT)
     data = []
     for creneau in creneaux_utilises:
         row = {'Creneau': creneau}
@@ -550,7 +549,8 @@ def generer_pdf_edt(attributions, promotion, creneaux_liste):
     elements.append(Paragraph(f"EDT Chronologique - Promotion {promotion}", subtitle_style))
     elements.append(Spacer(1, 0.2*cm))
     
-    df_grille, jours_ordre, _ = construire_grille_edt(attributions, CRENEAUX_DEFAUT)
+    creneaux_actifs = st.session_state.get('creneaux_actifs', CRENEAUX_DEFAUT)
+    df_grille, jours_ordre, _ = construire_grille_edt(attributions, creneaux_actifs)
     if df_grille is None:
         elements.append(Paragraph("Aucune donnée", styles['Normal']))
         doc.build(elements)
@@ -651,7 +651,7 @@ def generer_tableau_html(attributions, creneaux_utilises):
     html += "<tr><th>Creneau / Horaire</th>"
     for jour in jours: html += f"<th>{jour}</th>"
     html += "</tr>"
-    creneaux_a_afficher = CRENEAUX_DEFAUT
+    creneaux_a_afficher = st.session_state.get('creneaux_actifs', CRENEAUX_DEFAUT)
     for creneau in creneaux_a_afficher:
         html += f"<tr><td class='creneau-cell'>{creneau}</td>"
         for jour in jours:
@@ -896,7 +896,7 @@ def main():
             exclus = st.multiselect("Sélectionner les enseignants à EXCLURE", sorted(all_ens), default=st.session_state.exclus_manuels, key="w_exclus")
             st.session_state.exclus_manuels = exclus
             if not df_ens.empty:
-                disp_ens = df_ens[['nom', 'qualite', 'enseignements', 'promotion']].copy()
+                disp_ens = df_ens[['nom', 'qualite', 'Enseignements', 'Promotion']].copy()
                 disp_ens['Exclu'] = disp_ens['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
                 disp_ens = disp_ens.sort_values(by=['qualite', 'nom'], ascending=[True, True])
                 st.dataframe(disp_ens, use_container_width=True, hide_index=True)
@@ -949,7 +949,7 @@ def main():
                                 if promo_selected in st.session_state.jours_par_matiere and m_nom in st.session_state.jours_par_matiere[promo_selected]:
                                     del st.session_state.jours_par_matiere[promo_selected][m_nom]
                         with col_m3:
-                            options_h = ["Sélection manuelle"] + CRENEAUX_DEFAUT
+                            options_h = ["Sélection manuelle"] + st.session_state.creneaux_actifs
                             horaire_actuel = st.session_state.horaires_par_matiere.get(promo_selected, {}).get(m_nom, "Sélection manuelle")
                             try:
                                 idx_h = options_h.index(horaire_actuel)
@@ -971,7 +971,6 @@ def main():
                         total_promos = len(st.session_state.promotions_list)
                         generated_count = 0
                         
-                        # Initialisation globale du planning à partir des examens si nécessaire
                         if st.session_state.planning_df is None:
                             st.session_state.planning_df = st.session_state.examens_df.copy()
                             
@@ -981,10 +980,8 @@ def main():
                             horaires = st.session_state.horaires_par_matiere.get(p_item, None)
                             jours_m = st.session_state.jours_par_matiere.get(p_item, None)
                             
-                            # Récupération des lieux spécifiques ou défaut pour chaque promo
                             lieux_p = st.session_state.lieux_par_promo.get(p_item, lieux_sel)
                             
-                            # Génération de l'EDT global cumulatif sans écraser les autres promotions
                             df_updated = generer_planning_promo(
                                 st.session_state.planning_df, 
                                 p_item, 
@@ -992,7 +989,7 @@ def main():
                                 st.session_state.date_fin_val, 
                                 st.session_state.nb_par_jour, 
                                 st.session_state.jours_feries, 
-                                CRENEAUX_DEFAUT, 
+                                st.session_state.creneaux_actifs, 
                                 lieux_p, 
                                 ordre, 
                                 horaires, 
@@ -1031,7 +1028,7 @@ def main():
                                 "Horaire": st.column_config.SelectboxColumn(
                                     "Horaire",
                                     help="Sélectionner le créneau horaire",
-                                    options=CRENEAUX_DEFAUT,
+                                    options=st.session_state.creneaux_actifs,
                                     required=True
                                 )
                             }
@@ -1117,8 +1114,8 @@ def main():
                         column_config={
                             "Horaire": st.column_config.SelectboxColumn(
                                 "Horaire",
-                                help="Sélectionner le créneau horaire par défaut",
-                                options=CRENEAUX_DEFAUT,
+                                help="Sélectionner le créneau horaire",
+                                options=st.session_state.creneaux_actifs,
                                 required=True
                             )
                         }
@@ -1173,13 +1170,13 @@ def main():
                 st.markdown(f"#### 🎓 Promotion: **{promo_sel_choisie}**")
                 attr_promo = [a for a in st.session_state.surveillance_df if str(a.get('promotion', '')).strip() == str(promo_sel_choisie).strip()]
                 if attr_promo:
-                    df_grille, _, _ = construire_grille_edt(attr_promo, CRENEAUX_DEFAUT)
+                    df_grille, _, _ = construire_grille_edt(attr_promo, st.session_state.creneaux_actifs)
                     if df_grille is not None and not df_grille.empty:
                         st.dataframe(df_grille, use_container_width=True, hide_index=True)
                         c1, c2, c3 = st.columns(3)
                         with c1: st.download_button(f"⬇️ HTML - {promo_sel_choisie}", generer_html_edt(df_grille, promo_sel_choisie), f"EDT_{promo_sel_choisie}.html", "text/html", key=f"dl_html_{promo_sel_choisie}")
                         with c2: st.download_button(f"⬇️ Excel - {promo_sel_choisie}", generer_excel_edt(df_grille, promo_sel_choisie), f"EDT_{promo_sel_choisie}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_xlsx_{promo_sel_choisie}")
-                        with c3: st.download_button(f"⬇️ PDF - {promo_sel_choisie}", generer_pdf_edt(attr_promo, promo_sel_choisie, CRENEAUX_DEFAUT), f"EDT_{promo_sel_choisie}.pdf", "application/pdf", key=f"dl_pdf_{promo_sel_choisie}")
+                        with c3: st.download_button(f"⬇️ PDF - {promo_sel_choisie}", generer_pdf_edt(attr_promo, promo_sel_choisie, st.session_state.creneaux_actifs), f"EDT_{promo_sel_choisie}.pdf", "application/pdf", key=f"dl_pdf_{promo_sel_choisie}")
                 else:
                     st.info(f"Aucune attribution trouvée pour la promotion {promo_sel_choisie}.")
         else: st.warning("⚠️ Veuillez d'abord générer les attributions.")
@@ -1213,7 +1210,7 @@ def main():
             for promo in st.session_state.promotions_list:
                 attr_promo = [a for a in st.session_state.surveillance_df if str(a.get('promotion', '')).strip() == str(promo).strip()]
                 if attr_promo:
-                    df_g, _, _ = construire_grille_edt(attr_promo, CRENEAUX_DEFAUT)
+                    df_g, _, _ = construire_grille_edt(attr_promo, st.session_state.creneaux_actifs)
                     if df_g is not None and not df_g.empty:
                         with st.expander(f"🎓 Promotion : {promo}"):
                             st.dataframe(df_g, use_container_width=True, hide_index=True)
@@ -1223,7 +1220,7 @@ def main():
                             with b_ind2:
                                 st.download_button(f"Excel - {promo}", generer_excel_edt(df_g, promo), f"EDT_{promo}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.spreadsheet", key=f"rep_xlsx_{promo}")
                             with b_ind3:
-                                st.download_button(f"PDF - {promo}", generer_pdf_edt(attr_promo, promo, CRENEAUX_DEFAUT), f"EDT_{promo}.pdf", "application/pdf", key=f"rep_pdf_{promo}")
+                                st.download_button(f"PDF - {promo}", generer_pdf_edt(attr_promo, promo, st.session_state.creneaux_actifs), f"EDT_{promo}.pdf", "application/pdf", key=f"rep_pdf_{promo}")
                 else:
                     st.info(f"Promotion {promo} : Pas encore générée.")
         else:
@@ -1234,11 +1231,11 @@ def main():
         if st.session_state.surveillance_df is not None:
             attributions = st.session_state.surveillance_df
             col1, col2, col3 = st.columns(3)
-            with col1: st.download_button("⬇️ Télécharger HTML", generer_tableau_html(attributions, CRENEAUX_DEFAUT), "planning_surveillances.html", "text/html", key="dl_gh")
+            with col1: st.download_button("⬇️ Télécharger HTML", generer_tableau_html(attributions, st.session_state.creneaux_actifs), "planning_surveillances.html", "text/html", key="dl_gh")
             with col2: st.download_button("⬇️ Télécharger Excel", generer_excel_colore(attributions), "planning_surveillances.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.spreadsheet", key="dl_gx")
             with col3: st.download_button("⬇️ Télécharger PDF", generer_pdf(attributions), "planning_surveillances.pdf", "application/pdf", key="dl_gp")
             st.markdown("---")
-            st.markdown(generer_tableau_html(attributions, CRENEAUX_DEFAUT), unsafe_allow_html=True)
+            st.markdown(generer_tableau_html(attributions, st.session_state.creneaux_actifs), unsafe_allow_html=True)
         else: st.warning("Aucune attribution à exporter.")
 
 if __name__ == "__main__":
