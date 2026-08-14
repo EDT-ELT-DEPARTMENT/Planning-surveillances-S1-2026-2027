@@ -59,60 +59,58 @@ def enlever_accents(input_str):
     return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
 
 def normaliser_qualite(val):
-    val_clean = str(val).strip().lower()
-    if 'vacataire' in val_clean or 'vac' in val_clean:
+    val_clean = enlever_accents(str(val)).strip().lower()
+    if any(k in val_clean for k in ['vac', 'charg', 'contract', 'doctorant', 'assoc', 'extern', 'temp']):
         return 'Vacataire'
+    mapping = {
+        'permanent': 'Permanent', 'vacataire': 'Vacataire', 'contractuel': 'Contractuel', 'autre': 'Autre',
+        'professeur': 'Permanent', 'maitre de conferences': 'Permanent', 'mc': 'Permanent', 'prof': 'Permanent', 'mca': 'Permanent', 'mcb': 'Permanent'
+    }
+    for k, v in mapping.items():
+        if k in val_clean:
+            return v
     return 'Permanent'
 
-def est_cours(item_str):
-    """Vérifie si l'élément correspond à un cours (commence par Cours ou contient Cours)."""
-    item_clean = str(item_str).strip().lower()
-    return 'cours' in item_clean
+def est_cours(enseignement_str):
+    val = str(enseignement_str).strip()
+    return bool(re.match(r'^[Cc][Oo][Uu][Rr][Ss]', val))
 
-def extraire_nom_cours(item_str):
-    """Extrait et nettoie le nom du cours en supprimant le préfixe 'Cours-' ou similaire."""
-    item_str = str(item_str).strip()
-    item_nettoyé = re.sub(r'^(cours[\s\-\:]*)', '', item_str, flags=re.IGNORECASE)
-    return item_nettoyé.strip() if item_nettoyé else item_str
+def extraire_nom_cours(enseignement_str):
+    val = str(enseignement_str).strip()
+    nom = re.sub(r'^[Cc][Oo][Uu][Rr][Ss][ \-_:]+', '', val).strip()
+    return nom if nom else val
 
 def charger_fichier_source_auto():
     try:
-        paths_to_try = [
-            FICHIER_SOURCE, 
-            os.path.join(os.getcwd(), FICHIER_SOURCE),
+        paths_to_try = [FICHIER_SOURCE, os.path.join(os.getcwd(), FICHIER_SOURCE),
             os.path.join(os.path.dirname(os.path.abspath(__file__)), FICHIER_SOURCE),
             os.path.join("/mnt/agents/upload/", FICHIER_SOURCE),
-            os.path.join("/mount/src/planning-surveillances-s1-2026-2027/", FICHIER_SOURCE)
-        ]
+            os.path.join("/mount/src/planning-surveillances-s1-2026-2027/", FICHIER_SOURCE)]
         file_path = None
         for p in paths_to_try:
             if os.path.exists(p):
                 file_path = p
                 break
         if file_path is None:
-            return None, f"Fichier {FICHIER_SOURCE} non trouvé."
-        
-        # Correction robuste : lecture dynamique avec prise en compte des feuilles "matières" et "EDTCE" si disponibles
+            return None, f"Fichier {FICHIER_SOURCE} non trouve"
         xls = pd.ExcelFile(file_path)
         sheet_names = xls.sheet_names
-        
-        ens_sheet = sheet_names[0]
-        if "matières" in sheet_names:
-            ens_sheet = "matières"
-        
+        ens_sheet = None
+        for sheet in sheet_names:
+            df_test = pd.read_excel(file_path, sheet_name=sheet, nrows=5)
+            cols_lower = [enlever_accents(str(c)).lower().strip() for c in df_test.columns]
+            has_qualite = any('qualite' in c or 'quality' in c or 'statut' in c or 'grade' in c for c in cols_lower)
+            has_enseignements = any('enseignement' in c or 'cours' in c or 'matiere' in c or 'module' in c for c in cols_lower)
+            has_nom = any('nom' in c or 'name' in c or 'enseignant' in c for c in cols_lower)
+            if has_qualite and has_enseignements and has_nom:
+                ens_sheet = sheet
+                break
+        if ens_sheet is None and len(sheet_names) > 0:
+            ens_sheet = sheet_names[0]
         df_ens = pd.read_excel(file_path, sheet_name=ens_sheet)
         df_ens.columns = [str(col).strip() for col in df_ens.columns]
-        
-        col_qualite_trouvee = None
-        for col in df_ens.columns:
-            echantillon = df_ens[col].dropna().astype(str).str.lower().tolist()
-            if any('vacataire' in x for x in echantillon):
-                col_qualite_trouvee = col
-                break
-                
         cols_orig = list(df_ens.columns)
         cols_lower = [enlever_accents(c).lower().strip().replace(' ', '_').replace('-', '_') for c in cols_orig]
-        
         col_map = {}
         for i, c in enumerate(cols_lower):
             if any(x in c for x in ['nom', 'name', 'enseignant', 'prenom_nom', 'nom_prenom', 'professeur']):
@@ -123,37 +121,27 @@ def charger_fichier_source_auto():
                 col_map['enseignements'] = cols_orig[i]
             elif any(x in c for x in ['promotion', 'niveau', 'annee', 'class', 'promo', 'niveaux']):
                 col_map['promotion'] = cols_orig[i]
-                
-        if col_qualite_trouvee and ('qualite' not in col_map or not col_map['qualite']):
-            col_map['qualite'] = col_qualite_trouvee
-
         rename_map = {}
         if 'nom' in col_map: rename_map[col_map['nom']] = 'nom'
         if 'qualite' in col_map: rename_map[col_map['qualite']] = 'qualite'
-        if 'enseignements' in col_map: rename_map[col_map['enseignements']] = 'ContenuMatière'
+        if 'enseignements' in col_map: rename_map[col_map['enseignements']] = 'enseignements'
         if 'promotion' in col_map: rename_map[col_map['promotion']] = 'promotion'
-        
         df_ens = df_ens.rename(columns=rename_map)
-        
-        for col in ['qualite', 'ContenuMatière', 'promotion']:
+        if 'nom' not in df_ens.columns:
+            for col in df_ens.columns:
+                if df_ens[col].dtype == 'object':
+                    sample = df_ens[col].dropna().astype(str)
+                    if len(sample) > 0 and sample.str.len().mean() > 3:
+                        df_ens['nom'] = df_ens[col]
+                        break
+        for col in ['qualite', 'enseignements', 'promotion']:
             if col not in df_ens.columns:
                 df_ens[col] = ''
-                
-        # Correction orthographique ciblée des enseignants conformément aux directives
-        corrections_noms = {
-            "Belhadj": "Belabed",
-            "Zeghdoudi": "ZEGHOUDI",
-            "Babali": "Bahlil"
-        }
-        if 'nom' in df_ens.columns:
-            df_ens['nom'] = df_ens['nom'].replace(corrections_noms)
-                
         df_ens = df_ens[df_ens['nom'].notna() & (df_ens['nom'].astype(str).str.strip() != '')].copy()
-        df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)      
-        
+        df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)
         examens_data = []
         for _, row in df_ens.iterrows():
-            raw_ens = str(row.get('ContenuMatière', ''))
+            raw_ens = str(row.get('enseignements', ''))
             items = re.split(r'[,;/]+', raw_ens)
             for item in items:
                 item = item.strip()
@@ -231,12 +219,12 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
     date_courante = date_debut
     nb_lieux = len(lieux)
     if nb_lieux == 0:
-        st.error("Veuillez sélectionner au moins un lieu.")
+        st.error("Veuillez selectionner au moins un lieu.")
         return None
     creneaux_dispo = creneaux if creneaux else CRENEAUX
     nb_creneaux = len(creneaux_dispo)
     if nb_creneaux == 0:
-        st.error("Veuillez sélectionner au moins un créneau.")
+        st.error("Veuillez selectionner au moins un creneau.")
         return None
         
     idx = 0
@@ -413,15 +401,12 @@ def construire_grille_edt(attributions, creneaux_liste):
         if creneau not in grille[cle_jour]: grille[cle_jour][creneau] = []
         survs = attr.get('details_surveillants', [])
         surv_text = "\n".join([f"• {s['nom']} ({s['qualite']})" for s in survs])
-        
-        # Affichage explicite de la promotion dans l'interface et les grilles conformément aux directives
-        promo_val = attr.get('promotion', '')
         grille[cle_jour][creneau].append({
             'matiere': attr.get('matiere', ''), 
             'enseignant': attr.get('enseignant', ''),
             'lieu': attr.get('lieu', ''), 
             'surveillants': surv_text, 
-            'promotion': promo_val,
+            'promotion': attr.get('promotion', ''),
             'creneau': creneau,
             'date': date_str
         })
@@ -434,7 +419,7 @@ def construire_grille_edt(attributions, creneaux_liste):
             if exams:
                 cellules = []
                 for ex in exams:
-                    cell_text = f"📖 {ex['matiere']}\n🎓 Promo: {ex['promotion']}\n👤 Chargé: {ex['enseignant']}\n🏫 {ex['lieu']}\n👮\n{ex['surveillants']}"
+                    cell_text = f"📖 {ex['matiere']}\n👤 Chargé: {ex['enseignant']}\n🏫 {ex['lieu']}\n👮\n{ex['surveillants']}"
                     cellules.append(cell_text)
                 row[jour] = "\n---\n".join(cellules)
             else:
@@ -489,7 +474,6 @@ def generer_html_edt(df_grille, promotion):
         .creneau-cell {{ background-color: #E3F2FD; font-weight: bold; text-align: center; font-size: 12px; width: 120px; }}
         .exam-cell {{ background-color: #FFF8E1; text-align: center; }}
         .matiere {{ font-weight: bold; color: #1565C0; font-size: 12px; text-align: center; }}
-        .promo {{ color: #00796B; font-size: 10px; font-weight: bold; text-align: center; }}
         .ens {{ color: #333; font-size: 10px; text-align: center; }}
         .lieu {{ color: #E65100; font-size: 10px; font-weight: bold; text-align: center; }}
         .surv {{ color: #2E7D32; font-size: 10px; text-align: center; }}
@@ -515,7 +499,6 @@ def generer_html_edt(df_grille, promotion):
                     formatted = []
                     for line in lines:
                         if line.startswith('📖 '): formatted.append(f"<div class='matiere'>{line[2:]}</div>")
-                        elif line.startswith('🎓 '): formatted.append(f"<div class='promo'>{line[2:]}</div>")
                         elif line.startswith('👤 '): formatted.append(f"<div class='ens'>{line[2:]}</div>")
                         elif line.startswith('🏫 '): formatted.append(f"<div class='lieu'>{line[2:]}</div>")
                         elif line.startswith('👮'): formatted.append(f"<div class='surv'>{line}</div>")
@@ -545,7 +528,7 @@ def generer_pdf_edt(attributions, promotion, creneaux_liste):
     
     df_grille, jours_ordre, _ = construire_grille_edt(attributions, creneaux_liste)
     if df_grille is None:
-        elements.append(Paragraph("Aucune donnée", styles['Normal']))
+        elements.append(Paragraph("Aucune donnee", styles['Normal']))
         doc.build(elements)
         buffer.seek(0)
         return buffer
@@ -573,8 +556,6 @@ def generer_pdf_edt(attributions, promotion, creneaux_liste):
                     for line in lines:
                         if line.startswith('📖 '):
                             f_lines.append(f"<b>{line}</b>")
-                        elif line.startswith('🎓 '):
-                            f_lines.append(f"<font color='#00796B'><b>{line}</b></font>")
                         elif line.startswith('👤 '):
                             f_lines.append(f"{line.replace('👤 ', '')}")
                         elif line.startswith('🏫 '):
@@ -825,7 +806,7 @@ def main():
             <h3>{TITRE_PLATEFORME}</h3>
             <p><strong>Gestion des plannings d'examens et surveillances</strong> | Filtre: <b>Cours uniquement</b></p>
             <ul>
-                <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code> (feuilles <code>matières</code> / <code>EDTCE</code> prises en compte)</li>
+                <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
                 <li>🕐 <b>Choix du jour et de l'horaire par matière</b> (par promotion isolée)</li>
@@ -847,7 +828,7 @@ def main():
             exclus = st.multiselect("Sélectionner les enseignants à EXCLURE", sorted(all_ens), default=st.session_state.exclus_manuels, key="w_exclus")
             st.session_state.exclus_manuels = exclus
             if not df_ens.empty:
-                disp_ens = df_ens[['nom', 'qualite', 'ContenuMatière', 'promotion']].copy()
+                disp_ens = df_ens[['nom', 'qualite', 'enseignements', 'promotion']].copy()
                 disp_ens['Exclu'] = disp_ens['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
                 disp_ens = disp_ens.sort_values(by=['qualite', 'nom'], ascending=[True, True])
                 st.dataframe(disp_ens, use_container_width=True, hide_index=True)
