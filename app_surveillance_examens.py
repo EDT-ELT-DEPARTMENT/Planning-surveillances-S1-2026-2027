@@ -60,8 +60,10 @@ def enlever_accents(input_str):
 
 def normaliser_qualite(val):
     val_clean = enlever_accents(str(val)).strip().lower()
-    if any(k in val_clean for k in ['vac', 'charg', 'contract', 'doctorant', 'assoc', 'extern', 'temp']):
+    # Si la cellule contient explicitement le mot vacataire
+    if 'vacataire' in val_clean or val_clean == 'vacataire':
         return 'Vacataire'
+    return 'Permanent'
     mapping = {
         'permanent': 'Permanent', 'vacataire': 'Vacataire', 'contractuel': 'Contractuel', 'autre': 'Autre',
         'professeur': 'Permanent', 'maitre de conferences': 'Permanent', 'mc': 'Permanent', 'prof': 'Permanent', 'mca': 'Permanent', 'mcb': 'Permanent'
@@ -116,7 +118,7 @@ def charger_fichier_source_auto():
             if any(x in c for x in ['nom', 'name', 'enseignant', 'prenom_nom', 'nom_prenom', 'professeur']):
                 col_map['nom'] = cols_orig[i]
             elif any(x in c for x in ['qualite', 'quality', 'type', 'statut', 'grade', 'categorie', 'situation']):
-                col_map['qualite'] = cols_orig[i]
+                col_map['qualite'] = cols_orig[i]     
             elif any(x in c for x in ['enseignement', 'cours', 'matiere', 'module', 'discipline', 'ue', 'matieres', 'enseignements']):
                 col_map['enseignements'] = cols_orig[i]
             elif any(x in c for x in ['promotion', 'niveau', 'annee', 'class', 'promo', 'niveaux']):
