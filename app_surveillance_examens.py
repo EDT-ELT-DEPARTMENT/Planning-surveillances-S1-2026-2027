@@ -15,7 +15,6 @@ import os
 import re
 import time
 
-# Titre officiel rappelé conformément aux consignes
 TITRE_PLATEFORME = "Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA"
 
 st.set_page_config(page_title=TITRE_PLATEFORME, page_icon="📋", layout="wide", initial_sidebar_state="expanded")
@@ -48,7 +47,7 @@ def init_session_state():
         'permanents_list': [], 'vacataires_list': [], 'all_enseignants_list': [],
         'ordre_matieres': {}, 'lieux_par_promo': {},
         'horaires_par_matiere': {}, 'jours_par_matiere': {}, 'edt_par_promo': {},
-        'historique_edt': {}
+        'historique_edt': {}, 'planning_manuel': {}  # NOUVEAU : stockage du planning manuel
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -143,30 +142,17 @@ def charger_fichier_source_auto():
                 item = item.strip()
                 if item and est_cours(item):
                     nom_cours = extraire_nom_cours(item)
-                    code_cours = f"CODE-{abs(hash(nom_cours)) % 9000 + 1000}"
-                    examens_data.append({
-                        'Enseignements': nom_cours, 
-                        'Code': code_cours,
-                        'Enseignants': str(row.get('nom', '')).strip(), 
-                        'qualite_ens': row.get('qualite', 'Permanent'),
-                        'Horaire': None, 'Jours': None, 'Lieu': None,
+                    examens_data.append({'Enseignements': nom_cours, 'Code': f"CODE-{abs(hash(nom_cours)) % 9000 + 1000}", 
                         'Promotion': str(row.get('promotion', '')).strip(),
-                        'ordre': 999
-                    })
+                        'Enseignants': str(row.get('nom', '')).strip(), 'qualite_ens': row.get('qualite', 'Permanent'),
+                        'date': None, 'Horaire': None, 'Jours': None, 'Lieu': None, 'ordre': 999})
         df_exam = pd.DataFrame(examens_data)
-        colonnes_attendues = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion']
-        for col in colonnes_attendues:
-            if col not in df_exam.columns:
-                df_exam[col] = ''
-                
         df_exam = df_exam.drop_duplicates(subset=['Enseignements', 'Promotion', 'Enseignants']).copy()
         df_exam = df_exam.sort_values('Enseignants').drop_duplicates(subset=['Enseignements', 'Promotion'], keep='first').copy()
-        promotions = sorted(df_exam['Promotion'].dropna().astype(str).str.strip().unique().tolist()) if not df_exam.empty else []
+        df_ens['nb_surveillance'] = 0
+        df_ens['surveillance_attribuee'] = 0
+        promotions = sorted(df_exam['Promotion'].dropna().astype(str).str.strip().unique().tolist())
         promotions = [p for p in promotions if p != '']
-        
-        df_ens['is_perm'] = df_ens['qualite'].apply(lambda x: 0 if x == 'Permanent' else 1)
-        df_ens = df_ens.sort_values(['is_perm', 'nom']).drop(columns=['is_perm'])
-        
         permanents = df_ens[df_ens['qualite'] == 'Permanent']['nom'].dropna().unique().tolist()
         vacataires = df_ens[df_ens['qualite'] == 'Vacataire']['nom'].dropna().unique().tolist()
         all_ens = df_ens['nom'].dropna().unique().tolist()
@@ -199,68 +185,331 @@ def est_jour_travaille(date_obj, jours_feries):
             return False
     return True
 
-def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, creneaux, lieux, ordre_matieres=None, horaires_matiere=None, jours_matiere=None):
-    if examens_df is None or examens_df.empty:
-        return None
+def generer_dates_travail(date_debut, nb_jours=30, jours_feries=None):
+    """Génère une liste de dates de travail disponibles"""
+    if jours_feries is None:
+        jours_feries = []
+    dates = []
+    date_courante = date_debut
+    while len(dates) < nb_jours:
+        if est_jour_travaille(date_courante, jours_feries):
+            dates.append(date_courante)
+        date_courante += timedelta(days=1)
+    return dates
+
+def creer_planning_manuel_df(examens_df, promotion, dates_disponibles):
+    """Crée un DataFrame pour l'édition manuelle du planning"""
     promo_df = examens_df[examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()].copy()
     if promo_df.empty:
         return None
-    if ordre_matieres and promotion in ordre_matieres:
-        ordre_map = {m: i for i, m in enumerate(ordre_matieres[promotion])}
-        promo_df['ordre'] = promo_df['Enseignements'].map(ordre_map).fillna(999).astype(int)
-        promo_df = promo_df.sort_values('ordre')
-    else:
-        promo_df = promo_df.sort_values('Enseignements')
-        
-    date_courante = date_debut
-    nb_lieux = len(lieux)
-    if nb_lieux == 0:
-        st.error("Veuillez selectionner au moins un lieu.")
-        return None
-    creneaux_dispo = creneaux if creneaux else CRENEAUX
-    nb_creneaux = len(creneaux_dispo)
-    if nb_creneaux == 0:
-        st.error("Veuillez selectionner au moins un creneau.")
-        return None
-        
-    lieu_idx = 0
-    creneau_idx = 0
     
-    for i in promo_df.index:
-        matiere_nom = promo_df.at[i, 'Enseignements']
-        
-        date_pref = jours_matiere.get(promotion, {}).get(matiere_nom) if jours_matiere else None
-        if date_pref:
-            if isinstance(date_pref, datetime):
-                date_examen = date_pref.date()
-            else:
-                date_examen = date_pref
-        else:
-            while not est_jour_travaille(date_courante, jours_feries):
-                date_courante += timedelta(days=1)
-            date_examen = date_courante
-            
-        creneau_pref = horaires_matiere.get(promotion, {}).get(matiere_nom) if horaires_matiere else None
-        if creneau_pref:
-            creneau = creneau_pref
-        else:
-            creneau = creneaux_dispo[creneau_idx % nb_creneaux]
-            creneau_idx += 1
-            if creneau_idx % nb_creneaux == 0:
-                if not date_pref:
-                    date_courante += timedelta(days=1)
+    planning_data = []
+    for _, row in promo_df.iterrows():
+        planning_data.append({
+            'Enseignements': row.get('Enseignements', ''),
+            'Enseignants': row.get('Enseignants', ''),
+            'Code': row.get('Code', ''),
+            'Date': None,  # À remplir
+            'Horaire': None,  # À remplir
+            'Lieu': None,  # À remplir
+        })
+    
+    return pd.DataFrame(planning_data)
 
-        lieu = lieux[lieu_idx % nb_lieux]
+def appliquer_planning_manuel(examens_df, promotion, planning_edited):
+    """Applique le planning édité manuellement aux examens"""
+    if planning_edited is None or planning_edited.empty:
+        st.error("❌ Le planning est vide")
+        return None
+    
+    # Vérifier que toutes les dates/horaires/lieux sont remplis
+    if planning_edited.isnull().any().any():
+        st.warning("⚠️ Veuillez remplir TOUS les champs (Date, Horaire, Lieu)")
+        return None
+    
+    result = examens_df.copy()
+    
+    for _, row in planning_edited.iterrows():
+        matiere = row.get('Enseignements', '')
+        date_exam = row.get('Date', None)
+        horaire = row.get('Horaire', None)
+        lieu = row.get('Lieu', None)
         
-        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'date'] = date_examen
-        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Horaire'] = creneau
-        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Jours'] = JOURS_FR.get(date_examen.strftime("%A"), date_examen.strftime("%A"))
-        examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Lieu'] = lieu
+        # Convertir la date si nécessaire
+        if isinstance(date_exam, str):
+            try:
+                date_exam = datetime.strptime(date_exam, "%Y-%m-%d").date()
+            except:
+                date_exam = datetime.strptime(date_exam, "%d/%m/%Y").date()
         
-        lieu_idx += 1
-            
-    planning_promo_result = examens_df[examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()].sort_values(by=['date', 'Horaire', 'Lieu'])
-    return planning_promo_result
+        # Obtenir le jour de la semaine
+        jour = JOURS_FR.get(date_exam.strftime("%A"), date_exam.strftime("%A"))
+        
+        # Appliquer à toutes les lignes correspondant à cette matière/promo
+        mask = (result['Promotion'].astype(str).str.strip() == str(promotion).strip()) & \
+               (result['Enseignements'] == matiere)
+        
+        result.loc[mask, 'date'] = date_exam
+        result.loc[mask, 'Horaire'] = horaire
+        result.loc[mask, 'Jours'] = jour
+        result.loc[mask, 'Lieu'] = lieu
+    
+    return result
+
+def construire_grille_edt(attributions, creneaux_liste):
+    if not attributions:
+        return None, None, None
+    
+    attr_sorted = sorted(attributions, key=lambda x: (
+        x.get('date') if x.get('date') is not None else datetime.max,
+        creneaux_liste.index(x.get('creneau', '')) if x.get('creneau', '') in creneaux_liste else 999
+    ))
+    
+    grille = {}
+    jours_ordre = []
+    
+    for attr in attr_sorted:
+        date_val = attr.get('date', None)
+        if date_val is None: continue
+        
+        if isinstance(date_val, str):
+            try: date_val = datetime.strptime(date_val, "%Y-%m-%d").date()
+            except: continue
+        elif isinstance(date_val, datetime): date_val = date_val.date()
+        
+        jour_nom = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
+        date_str = date_val.strftime('%d/%m/%Y')
+        cle_jour = f"{jour_nom}\n{date_str}"
+        
+        if cle_jour not in grille:
+            grille[cle_jour] = {}
+            jours_ordre.append(cle_jour)
+        
+        creneau = attr.get('creneau', '')
+        if creneau not in grille[cle_jour]: 
+            grille[cle_jour][creneau] = []
+        
+        grille[cle_jour][creneau].append(attr)
+    
+    creneaux_utilises = creneaux_liste if creneaux_liste else CRENEAUX
+    data = []
+    
+    for creneau in creneaux_utilises:
+        row = {'Creneau': creneau}
+        for jour in jours_ordre:
+            exams = grille.get(jour, {}).get(creneau, [])
+            if exams:
+                cellules = []
+                for ex in exams:
+                    cell_text = (
+                        f"📖 {ex.get('matiere', '')}\n"
+                        f"👤 {ex.get('enseignant', '')}\n"
+                        f"🏫 {ex.get('lieu', '')}\n"
+                        f"👮 Surveillance:\n" + ", ".join([s['nom'] for s in ex.get('details_surveillants', [])])
+                    )
+                    cellules.append(cell_text)
+                row[jour] = "\n---\n".join(cellules)
+            else:
+                row[jour] = ""
+        data.append(row)
+    
+    df_grille = pd.DataFrame(data)
+    return df_grille, jours_ordre, grille
+
+def generer_html_edt(df_grille, promotion):
+    jours_cols = [c for c in df_grille.columns if c != 'Creneau']
+    html = f"""
+    <style>
+        .edt-table {{ border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 11px; }}
+        .edt-table th {{ background-color: #1565C0; color: white; padding: 12px; text-align: center; border: 2px solid #0D47A1; font-size: 12px; font-weight: bold; }}
+        .edt-table td {{ padding: 12px; border: 1px solid #90CAF9; vertical-align: top; min-width: 220px; text-align: center; }}
+        .creneau-cell {{ background-color: #E3F2FD; font-weight: bold; text-align: center; font-size: 12px; width: 120px; }}
+        .exam-cell {{ background-color: #FFF8E1; text-align: center; }}
+    </style>
+    <h2 style="color:#1565C0; text-align:center;">📅 EDT EXAMENS - Promotion {promotion}</h2>
+    <table class="edt-table">
+    <tr><th>Créneau</th>"""
+    for jour in jours_cols:
+        html += f"<th>{jour.replace(chr(10), '<br>')}</th>"
+    html += "</tr>"
+    
+    for _, row in df_grille.iterrows():
+        html += f"<tr><td class='creneau-cell'>{row['Creneau']}</td>"
+        for jour in jours_cols:
+            val = row.get(jour, '')
+            html += f"<td class='exam-cell'>{val.replace(chr(10), '<br>')}</td>"
+        html += "</tr>"
+    html += "</table>"
+    return html
+
+def generer_excel_edt(df_grille, promotion):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"EDT {promotion}"
+    
+    header_fill = PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True, size=11)
+    
+    headers = ['Creneau'] + [c for c in df_grille.columns if c != 'Creneau']
+    
+    for c_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=c_idx, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    
+    for r_idx, row in df_grille.iterrows():
+        for c_idx, col_name in enumerate(headers, 1):
+            val = row.get(col_name, '')
+            cell = ws.cell(row=r_idx + 2, column=c_idx, value=val)
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    
+    ws.column_dimensions['A'].width = 18
+    for col_idx in range(2, len(headers) + 1):
+        ws.column_dimensions[f'{chr(64+col_idx)}'.replace('64', 'A')].width = 40
+    
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+def generer_pdf_edt(attributions, promotion, creneaux_liste):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=1*cm, leftMargin=1*cm, topMargin=1*cm, bottomMargin=1*cm)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    elements.append(Paragraph(f"📅 EDT EXAMENS - {promotion}", styles['Heading1']))
+    elements.append(Spacer(1, 0.3*cm))
+    
+    df_grille, _, _ = construire_grille_edt(attributions, creneaux_liste)
+    if df_grille is None:
+        elements.append(Paragraph("Aucune donnée", styles['Normal']))
+    else:
+        table_data = [['Créneau'] + [c.replace('\n', ' ') for c in df_grille.columns if c != 'Creneau']]
+        for _, row in df_grille.iterrows():
+            table_data.append([row.get(col, '') for col in df_grille.columns])
+        
+        table = Table(table_data, repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565C0')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#90CAF9')),
+        ]))
+        elements.append(table)
+    
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+def generer_tableau_html(attributions):
+    if not attributions: return "<p>Aucune attribution</p>"
+    planning_par_jour = {}
+    for attr in attributions:
+        date_val = attr.get('date', None)
+        if date_val is None: continue
+        if isinstance(date_val, str):
+            try: date_val = datetime.strptime(date_val, "%Y-%m-%d").date()
+            except: continue
+        elif isinstance(date_val, datetime): date_val = date_val.date()
+        date_str = date_val.strftime('%d/%m/%Y')
+        jour_fr = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
+        cle = f"{jour_fr} {date_str}"
+        if cle not in planning_par_jour: planning_par_jour[cle] = {}
+        creneau = attr.get('creneau', '')
+        if creneau not in planning_par_jour[cle]: planning_par_jour[cle][creneau] = []
+        planning_par_jour[cle][creneau].append(attr)
+    html = """<table border='1' style='border-collapse:collapse;width:100%;'>
+    <tr style='background-color:#1565C0;color:white;'><th>Créneau</th>"""
+    jours = sorted(planning_par_jour.keys())
+    for jour in jours: html += f"<th>{jour}</th>"
+    html += "</tr>"
+    for creneau in CRENEAUX:
+        html += f"<tr><td style='background-color:#E3F2FD;font-weight:bold;'>{creneau}</td>"
+        for jour in jours:
+            html += "<td>"
+            if creneau in planning_par_jour.get(jour, {}):
+                for examen in planning_par_jour[jour][creneau]:
+                    html += f"<div style='background-color:#FFF8E1;padding:5px;margin:2px;border-left:3px solid #FFA000;'><strong>{examen.get('matiere', '')}</strong><br>{examen.get('lieu', '')}</div>"
+            html += "</td>"
+        html += "</tr>"
+    html += "</table>"
+    return html
+
+def generer_excel_colore(attributions):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Planning"
+    
+    data = []
+    for attr in attributions:
+        date_val = attr.get('date', None)
+        if hasattr(date_val, 'strftime'):
+            date_str = date_val.strftime('%d/%m/%Y')
+            jour = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
+        else:
+            date_str = str(date_val)
+            jour = ''
+        surv_str = ", ".join([f"{s['nom']}" for s in attr.get('details_surveillants', [])])
+        data.append({
+            'Date': date_str, 'Jour': jour, 'Créneau': attr.get('creneau', ''), 
+            'Matière': attr.get('matiere', ''), 'Enseignant': attr.get('enseignant', ''),
+            'Promotion': attr.get('promotion', ''), 'Lieu': attr.get('lieu', ''), 
+            'Surveillants': surv_str
+        })
+    
+    df = pd.DataFrame(data)
+    header_fill = PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True, size=11)
+    
+    for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
+        for c_idx, value in enumerate(row, 1):
+            cell = ws.cell(row=r_idx, column=c_idx, value=value)
+            if r_idx == 1:
+                cell.fill = header_fill
+                cell.font = header_font
+    
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+def generer_pdf(attributions):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=1*cm, leftMargin=1*cm, topMargin=1*cm, bottomMargin=1*cm)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    elements.append(Paragraph("📋 PLANNING DES SURVEILLANCES", styles['Heading1']))
+    elements.append(Spacer(1, 0.3*cm))
+    
+    attr_sorted = sorted(attributions, key=lambda x: x.get('date', datetime.max))
+    table_data = [['Date', 'Jour', 'Créneau', 'Matière', 'Enseignant', 'Promotion', 'Lieu', 'Surveillants']]
+    
+    for attr in attr_sorted:
+        date_val = attr.get('date', None)
+        if hasattr(date_val, 'strftime'):
+            date_str = date_val.strftime('%d/%m/%Y')
+            jour = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
+        else:
+            date_str = str(date_val)
+            jour = ''
+        surv_str = ", ".join([f"{s['nom']}" for s in attr.get('details_surveillants', [])])
+        table_data.append([date_str, jour, attr.get('creneau', ''), attr.get('matiere', ''),
+            attr.get('enseignant', ''), attr.get('promotion', ''), attr.get('lieu', ''), surv_str])
+    
+    table = Table(table_data, repeatRows=1)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565C0')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#90CAF9')),
+    ]))
+    elements.append(table)
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
 
 def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
     if planning_df is None or enseignants_df is None:
@@ -354,395 +603,15 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                         surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'] += 1
                         break
 
-        while len(liste_surveillants) < nb_par_lieu:
-            assigned_added = False
-            for _, aut in autres.iterrows():
-                if aut['nom'] in surveillants_occupes or aut['nom'] in exclus: continue
-                current_count = surveillants.loc[surveillants['nom'] == aut['nom'], 'surveillance_attribuee'].values[0]
-                if current_count < st.session_state.get('nb_surv_autre', 1):
-                    liste_surveillants.append({'nom': aut['nom'], 'qualite': aut['qualite'], 'priorite': 'Autre'})
-                    surveillants_occupes.add(aut['nom'])
-                    surveillants.loc[surveillants['nom'] == aut['nom'], 'surveillance_attribuee'] += 1
-                    assigned_added = True
-                    break
-            if not assigned_added:
-                break
-                
-        attributions.append({
-            'date': date_examen, 'creneau': creneau_examen, 'matiere': matiere_examen,
-            'enseignant': enseignant_matiere, 'promotion': promotion_examen, 'lieu': lieu_examen,
-            'surveillants': [s['nom'] for s in liste_surveillants], 'details_surveillants': liste_surveillants
-        })
-        
-    attributions = sorted(attributions, key=lambda x: (x.get('date', datetime.min), x.get('creneau', ''), x.get('promotion', '')))
+        attributions.append({'date': date_examen, 'creneau': creneau_examen, 'matiere': matiere_examen,
+            'promotion': promotion_examen, 'lieu': lieu_examen, 'enseignant': enseignant_matiere,
+            'surveillants': [s['nom'] for s in liste_surveillants], 'details_surveillants': liste_surveillants})
+    
     return attributions, surveillants
-
-def construire_grille_edt(attributions, creneaux_liste):
-    if not attributions:
-        return None, None, None
-    grille = {}
-    jours_ordre = []
-    for attr in attributions:
-        date_val = attr.get('date', None)
-        if date_val is None: continue
-        if isinstance(date_val, str):
-            try: date_val = datetime.strptime(date_val, "%Y-%m-%d").date()
-            except: continue
-        elif isinstance(date_val, datetime): date_val = date_val.date()
-        jour_nom = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
-        date_str = date_val.strftime('%d/%m/%Y')
-        cle_jour = f"{jour_nom}\n{date_str}"
-        if cle_jour not in grille:
-            grille[cle_jour] = {}
-            jours_ordre.append(cle_jour)
-        creneau = attr.get('creneau', '')
-        if creneau not in grille[cle_jour]: grille[cle_jour][creneau] = []
-        survs = attr.get('details_surveillants', [])
-        surv_text = "\n".join([f"• {s['nom']} ({s['qualite']})" for s in survs])
-        grille[cle_jour][creneau].append({
-            'matiere': attr.get('matiere', ''), 
-            'enseignant': attr.get('enseignant', ''),
-            'lieu': attr.get('lieu', ''), 
-            'surveillants': surv_text, 
-            'promotion': attr.get('promotion', ''),
-            'creneau': creneau,
-            'date': date_str
-        })
-    creneaux_utilises = creneaux_liste if creneaux_liste else CRENEAUX
-    data = []
-    for creneau in creneaux_utilises:
-        row = {'Creneau': creneau}
-        for jour in jours_ordre:
-            exams = grille.get(jour, {}).get(creneau, [])
-            if exams:
-                cellules = []
-                for ex in exams:
-                    cell_text = f"📖 {ex['matiere']}\n👤 Chargé: {ex['enseignant']}\n🏫 {ex['lieu']}\n👮\n{ex['surveillants']}"
-                    cellules.append(cell_text)
-                row[jour] = "\n---\n".join(cellules)
-            else:
-                row[jour] = ""
-        data.append(row)
-    df_grille = pd.DataFrame(data)
-    return df_grille, jours_ordre, grille
-
-def generer_excel_edt(df_grille, promotion):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = f"EDT {promotion}"
-    header_fill = PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid")
-    header_font = Font(color="FFFFFF", bold=True, size=11)
-    creneau_fill = PatternFill(start_color="E3F2FD", end_color="E3F2FD", fill_type="solid")
-    creneau_font = Font(bold=True, size=10)
-    cell_fill = PatternFill(start_color="FFF8E1", end_color="FFF8E1", fill_type="solid")
-    cell_font = Font(size=9)
-    thin_border = Border(left=Side(style='thin', color='90CAF9'), right=Side(style='thin', color='90CAF9'),
-                         top=Side(style='thin', color='90CAF9'), bottom=Side(style='thin', color='90CAF9'))
-    headers = ['Creneau'] + [c for c in df_grille.columns if c != 'Creneau']
-    for c_idx, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=c_idx, value=header)
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        cell.border = thin_border
-    for r_idx, row in df_grille.iterrows():
-        for c_idx, col_name in enumerate(headers, 1):
-            val = row.get(col_name, '')
-            cell = ws.cell(row=r_idx + 2, column=c_idx, value=val)
-            cell.border = thin_border
-            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-            if col_name == 'Creneau':
-                cell.fill = creneau_fill
-                cell.font = creneau_font
-            else:
-                cell.fill = cell_fill
-                cell.font = cell_font
-    buffer = io.BytesIO()
-    wb.save(buffer)
-    buffer.seek(0)
-    return buffer
-
-def generer_html_edt(df_grille, promotion):
-    jours_cols = [c for c in df_grille.columns if c != 'Creneau']
-    html = f"""
-    <style>
-        .edt-table {{ border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 11px; text-align: center; }}
-        .edt-table th {{ background-color: #1565C0; color: white; padding: 10px; text-align: center; border: 2px solid #0D47A1; font-size: 12px; }}
-        .edt-table td {{ padding: 8px; border: 1px solid #90CAF9; vertical-align: middle; text-align: center; min-width: 200px; }}
-        .creneau-cell {{ background-color: #E3F2FD; font-weight: bold; text-align: center; font-size: 12px; width: 120px; }}
-        .exam-cell {{ background-color: #FFF8E1; text-align: center; }}
-        .matiere {{ font-weight: bold; color: #1565C0; font-size: 12px; text-align: center; }}
-        .ens {{ color: #333; font-size: 10px; text-align: center; }}
-        .lieu {{ color: #E65100; font-size: 10px; font-weight: bold; text-align: center; }}
-        .surv {{ color: #2E7D32; font-size: 10px; text-align: center; }}
-        .sep {{ border-top: 1px dashed #ccc; margin: 4px 0; }}
-    </style>
-    <h2 style="color:#1565C0; text-align:center;">{TITRE_PLATEFORME}</h2>
-    <h3 style="color:#333; text-align:center;">EDT Chronologique - Promotion {promotion}</h3>
-    <table class="edt-table">
-    """
-    html += "<tr><th>Creneau / Horaire</th>"
-    for jour in jours_cols:
-        html += f"<th>{jour.replace(chr(10), '<br>')}</th>"
-    html += "</tr>"
-    for _, row in df_grille.iterrows():
-        html += f"<tr><td class='creneau-cell'>{row['Creneau']}</td>"
-        for jour in jours_cols:
-            val = row.get(jour, '')
-            if val:
-                parts = val.split('\n---\n')
-                cells_html = []
-                for part in parts:
-                    lines = part.split('\n')
-                    formatted = []
-                    for line in lines:
-                        if line.startswith('📖 '): formatted.append(f"<div class='matiere'>{line[2:]}</div>")
-                        elif line.startswith('👤 '): formatted.append(f"<div class='ens'>{line[2:]}</div>")
-                        elif line.startswith('🏫 '): formatted.append(f"<div class='lieu'>{line[2:]}</div>")
-                        elif line.startswith('👮'): formatted.append(f"<div class='surv'>{line}</div>")
-                        elif line.startswith('• '): formatted.append(f"<div class='surv'>{line}</div>")
-                        else: formatted.append(f"<div>{line}</div>")
-                    cells_html.append("".join(formatted))
-                content = "<div class='sep'></div>".join(cells_html)
-                html += f"<td class='exam-cell'>{content}</td>"
-            else:
-                html += "<td></td>"
-        html += "</tr>"
-    html += "</table>"
-    return html
-
-def generer_pdf_edt(attributions, promotion, creneaux_liste):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=1*cm, leftMargin=1*cm, topMargin=1*cm, bottomMargin=1*cm)
-    elements = []
-    styles = getSampleStyleSheet()
-    
-    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=13, textColor=colors.HexColor('#1565C0'), spaceAfter=6, alignment=1)
-    subtitle_style = ParagraphStyle('SubTitle', parent=styles['Normal'], alignment=1, fontSize=10, textColor=colors.HexColor('#333333'), spaceAfter=10)
-    
-    elements.append(Paragraph(TITRE_PLATEFORME, title_style))
-    elements.append(Paragraph(f"EDT Chronologique - Promotion {promotion}", subtitle_style))
-    elements.append(Spacer(1, 0.2*cm))
-    
-    df_grille, jours_ordre, _ = construire_grille_edt(attributions, creneaux_liste)
-    if df_grille is None:
-        elements.append(Paragraph("Aucune donnee", styles['Normal']))
-        doc.build(elements)
-        buffer.seek(0)
-        return buffer
-        
-    jours_cols = [c for c in df_grille.columns if c != 'Creneau']
-    
-    header_style = ParagraphStyle('TableHeader', parent=styles['Normal'], fontSize=8, leading=10, textColor=colors.whitesmoke, alignment=1, fontName='Helvetica-Bold')
-    creneau_header_style = ParagraphStyle('CreneauHeader', parent=header_style, fontSize=8, leading=10)
-    
-    table_data = [[Paragraph('Creneau / Horaire', creneau_header_style)] + [Paragraph(j.replace('\n', '<br/>'), header_style) for j in jours_cols]]
-    
-    cell_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontSize=7, leading=9, alignment=1, textColor=colors.HexColor('#333333'))
-    creneau_cell_style = ParagraphStyle('CreneauCell', parent=cell_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#1565C0'))
-    
-    for _, row in df_grille.iterrows():
-        row_data = [Paragraph(str(row['Creneau']), creneau_cell_style)]
-        for jour in jours_cols:
-            val = row.get(jour, '')
-            if val:
-                parts = val.split('\n---\n')
-                formatted_parts = []
-                for part in parts:
-                    lines = part.split('\n')
-                    f_lines = []
-                    for line in lines:
-                        if line.startswith('📖 '):
-                            f_lines.append(f"<b>{line}</b>")
-                        elif line.startswith('👤 '):
-                            f_lines.append(f"{line.replace('👤 ', '')}")
-                        elif line.startswith('🏫 '):
-                            f_lines.append(f"<font color='#E65100'><b>{line}</b></font>")
-                        elif line.startswith('• '):
-                            f_lines.append(f"<font color='#2E7D32'>{line}</font>")
-                        elif line == '👮':
-                            continue
-                        else:
-                            f_lines.append(line)
-                    formatted_parts.append("<br/>".join(f_lines))
-                cell_content = "<br/><br/>".join(formatted_parts)
-                row_data.append(Paragraph(cell_content, cell_style))
-            else:
-                row_data.append(Paragraph("", cell_style))
-        table_data.append(row_data)
-        
-    available_width = 27.7 * cm
-    col_widths = [3 * cm] + [(available_width - 3 * cm) / len(jours_cols)] * len(jours_cols)
-    
-    table = Table(table_data, repeatRows=1, colWidths=col_widths)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565C0')),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#90CAF9')),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#E3F2FD'), colors.HexColor('#FFFFFF')]),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ('LEFTPADDING', (0, 0), (-1, -1), 4),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-    ]))
-    elements.append(table)
-    doc.build(elements)
-    buffer.seek(0)
-    return buffer
-
-def generer_tableau_html(attributions):
-    if not attributions: return "<p style='text-align:center;'>Aucune attribution</p>"
-    planning_par_jour = {}
-    for attr in attributions:
-        date_val = attr.get('date', None)
-        if date_val is None: continue
-        if isinstance(date_val, str):
-            try: date_val = datetime.strptime(date_val, "%Y-%m-%d").date()
-            except: continue
-        elif isinstance(date_val, datetime): date_val = date_val.date()
-        date_str = date_val.strftime('%d/%m/%Y')
-        jour_fr = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
-        cle = f"{jour_fr} {date_str}"
-        if cle not in planning_par_jour: planning_par_jour[cle] = {}
-        creneau = attr.get('creneau', '')
-        if creneau not in planning_par_jour[cle]: planning_par_jour[cle][creneau] = []
-        planning_par_jour[cle][creneau].append(attr)
-    html = f"""
-    <style>
-        .planning-table {{ border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 11px; text-align: center; }}
-        .planning-table th {{ background-color: #1565C0; color: white; padding: 8px; text-align: center; border: 2px solid #0D47A1; }}
-        .planning-table td {{ padding: 6px; border: 1px solid #90CAF9; vertical-align: middle; text-align: center; }}
-        .creneau-cell {{ background-color: #E3F2FD; font-weight: bold; text-align: center; width: 120px; }}
-        .examen-cell {{ background-color: #FFF8E1; margin: 2px auto; padding: 5px; border-radius: 3px; border-left: 3px solid #FFA000; font-size: 10px; text-align: center; }}
-    </style>
-    <h3 style="color:#1565C0; text-align:center;">{TITRE_PLATEFORME}</h3>
-    <table class="planning-table">
-    """
-    jours = sorted(planning_par_jour.keys())
-    html += "<tr><th>Creneau / Horaire</th>"
-    for jour in jours: html += f"<th>{jour}</th>"
-    html += "</tr>"
-    for creneau in CRENEAUX:
-        html += f"<tr><td class='creneau-cell'>{creneau}</td>"
-        for jour in jours:
-            html += "<td>"
-            if creneau in planning_par_jour.get(jour, {}):
-                for examen in planning_par_jour[jour][creneau]:
-                    survs = examen.get('details_surveillants', [])
-                    surv_html = "<br>".join([f"<span>{s['nom']} ({s['qualite']}{'*' if s.get('priorite') == 'Charge de matiere' else ''})</span>" for s in survs])
-                    html += f"<div class='examen-cell'><strong>{examen.get('matiere', '')}</strong><br><small>Promo: {examen.get('promotion', '')} | Lieu: {examen.get('lieu', '')}</small><br><small>Chargé: {examen.get('enseignant', '')}</small><br><small>{surv_html}</small></div>"
-            html += "</td>"
-        html += "</tr>"
-    html += "</table>"
-    return html
-
-def generer_excel_colore(attributions):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Planning Global"
-    data = []
-    for attr in attributions:
-        date_val = attr.get('date', None)
-        if hasattr(date_val, 'strftime'):
-            date_str = date_val.strftime('%d/%m/%Y')
-            jour = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
-        else:
-            date_str = str(date_val)
-            jour = ''
-        surv_str = ", ".join([f"{s['nom']} ({s['qualite']})" for s in attr.get('details_surveillants', [])])
-        data.append({
-            'Enseignements': attr.get('matiere', ''), 
-            'Code': f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}", 
-            'Enseignants': attr.get('enseignant', ''), 
-            'Horaire': attr.get('creneau', ''), 
-            'Jours': jour, 
-            'Lieu': attr.get('lieu', ''), 
-            'Promotion': attr.get('promotion', ''),
-            'Date': date_str,
-            'Surveillants': surv_str
-        })
-    df = pd.DataFrame(data)
-    cols_order = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Date', 'Surveillants']
-    df = df[[c for c in cols_order if c in df.columns]]
-    
-    header_fill = PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid")
-    header_font = Font(color="FFFFFF", bold=True, size=11)
-    for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
-        for c_idx, value in enumerate(row, 1):
-            cell = ws.cell(row=r_idx, column=c_idx, value=value)
-            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-            if r_idx == 1:
-                cell.fill = header_fill
-                cell.font = header_font
-            else:
-                cell.border = Border(left=Side(style='thin', color='90CAF9'), right=Side(style='thin', color='90CAF9'), top=Side(style='thin', color='90CAF9'), bottom=Side(style='thin', color='90CAF9'))
-    for col in ws.columns:
-        max_length = 0
-        column = col[0].column_letter
-        for cell in col:
-            try:
-                if cell.value: max_length = max(max_length, len(str(cell.value)))
-            except: pass
-        ws.column_dimensions[column].width = min(max(max_length + 2, 15), 50)
-    
-    buffer = io.BytesIO()
-    wb.save(buffer)
-    buffer.seek(0)
-    return buffer
-
-def generer_pdf(attributions):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=1*cm, leftMargin=1*cm, topMargin=1*cm, bottomMargin=1*cm)
-    elements = []
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=12, textColor=colors.HexColor('#1565C0'), spaceAfter=10, alignment=1)
-    elements.append(Paragraph(TITRE_PLATEFORME, title_style))
-    elements.append(Paragraph("PLANNING CHRONOLOGIQUE DES SURVEILLANCES", styles['Heading2']))
-    elements.append(Spacer(1, 0.3*cm))
-    table_data = [['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Date', 'Surveillants']]
-    for attr in attributions:
-        date_val = attr.get('date', None)
-        if hasattr(date_val, 'strftime'):
-            date_str = date_val.strftime('%d/%m/%Y')
-            jour = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
-        else:
-            date_str = str(date_val)
-            jour = ''
-        surv_str = ", ".join([f"{s['nom']} ({s['qualite']})" for s in attr.get('details_surveillants', [])])
-        table_data.append([
-            attr.get('matiere', ''), 
-            f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}", 
-            attr.get('enseignant', ''), 
-            attr.get('creneau', ''), 
-            jour, 
-            attr.get('lieu', ''), 
-            attr.get('promotion', ''), 
-            date_str, 
-            surv_str
-        ])
-    table = Table(table_data, repeatRows=1)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565C0')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#90CAF9')),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 7),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#E3F2FD'), colors.HexColor('#FFFFFF')]),
-    ]))
-    elements.append(table)
-    doc.build(elements)
-    buffer.seek(0)
-    return buffer
 
 def main():
     init_session_state()
-    st.markdown(f'<div class="main-header">{TITRE_PLATEFORME}</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">📋 Gestion des EDTs - S2 2026</div>', unsafe_allow_html=True)
 
     if not st.session_state.data_loaded:
         with st.spinner("Chargement du fichier source..."):
@@ -751,276 +620,182 @@ def main():
                 st.session_state.enseignants_df = result['enseignants']
                 st.session_state.examens_df = result['examens']
                 st.session_state.promotions_list = result['promotions']
-                st.session_state.permanents_list = result['permanents']
-                st.session_state.vacataires_list = result['vacataires']
-                st.session_state.all_enseignants_list = result['all_enseignants']
                 st.session_state.data_loaded = True
-                if result['promotions']: st.session_state.promo_selected = result['promotions'][0]
-                st.success(f"✅ Chargé: {result['sheet_used']} | {len(result['enseignants'])} ens. ({len(result['vacataires'])} vacataires) | {len(result['examens'])} cours | Promos: {', '.join(result['promotions'])}")
+                st.success(f"✅ Chargé: {len(result['enseignants'])} ens. | {len(result['examens'])} cours | Promos: {', '.join(result['promotions'])}")
             else:
                 st.error(f"❌ {error}")
 
     with st.sidebar:
         st.markdown("## ⚙️ Configuration")
-        if st.session_state.data_loaded:
-            st.markdown("### 📁 Source")
-            st.success(f"{FICHIER_SOURCE} chargé")
-            st.markdown(f"- Enseignants: {len(st.session_state.enseignants_df)}")
-            st.markdown(f"- Vacataires détectés: {len(st.session_state.vacataires_list)}")
-            st.markdown(f"- **Cours uniquement**: {len(st.session_state.examens_df)}")
-            st.markdown(f"- Promotions: {', '.join(st.session_state.promotions_list)}")
-            if st.button("🔄 Recharger", key="btn_reload"):
-                st.session_state.data_loaded = False
-                st.rerun()
-        else:
-            st.warning("Fichier non chargé")
-            fu = st.file_uploader("Charger manuellement", type=['xlsx', 'xls'], key="manual_up")
-            if fu is not None:
-                with open(FICHIER_SOURCE, "wb") as f: f.write(fu.getvalue())
-                st.session_state.data_loaded = False
-                st.rerun()
+        st.session_state.nb_surv_permanent = st.number_input("Permanents", 1, 10, st.session_state.nb_surv_permanent)
+        st.session_state.nb_surv_vacataire = st.number_input("Vacataires", 1, 10, st.session_state.nb_surv_vacataire)
+        st.session_state.nb_surv_par_lieu = st.number_input("Surv. par lieu", 1, 5, st.session_state.nb_surv_par_lieu)
         st.markdown("---")
-        st.markdown("### 📊 Quotas")
-        st.session_state.nb_surv_permanent = st.number_input("Permanent", 0, 20, st.session_state.nb_surv_permanent, key="w_qp")
-        st.session_state.nb_surv_vacataire = st.number_input("Vacataire", 0, 20, st.session_state.nb_surv_vacataire, key="w_qv")
-        st.session_state.nb_surv_autre = st.number_input("Autre", 0, 20, st.session_state.nb_surv_autre, key="w_qa")
-        st.session_state.nb_surv_par_lieu = st.number_input("Surv. par lieu", 1, 5, st.session_state.nb_surv_par_lieu, key="w_nl")
-        st.markdown("---")
-        st.markdown("### 📅 Date de Début")
-        st.session_state.date_debut_val = st.date_input("Date début", st.session_state.date_debut_val, key="w_dd")
-        
-        st.markdown("### 🎉 Jours Fériés (Calendrier)")
-        if 'jours_feries_list' not in st.session_state:
-            st.session_state.jours_feries_list = []
-            
-        col_pick, col_add = st.columns([2, 1])
-        with col_pick:
-            date_ferie_choisie = st.date_input("Choisir un férié", key="picker_ferie_unique")
-        with col_add:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("Ajouter", key="btn_add_ferie"):
-                if date_ferie_choisie not in st.session_state.jours_feries_list:
-                    st.session_state.jours_feries_list.append(date_ferie_choisie)
-                    st.session_state.jours_feries = sorted(st.session_state.jours_feries_list)
-                    st.rerun()
-                    
-        if st.session_state.jours_feries_list:
-            st.write("Jours fériés enregistrés :")
-            for jf_item in list(st.session_state.jours_feries_list):
-                c_jf1, c_jf2 = st.columns([3, 1])
-                with c_jf1:
-                    st.text(jf_item.strftime("%d/%m/%Y"))
-                with c_jf2:
-                    if st.button("❌", key=f"del_ferie_{jf_item}"):
-                        st.session_state.jours_feries_list.remove(jf_item)
-                        st.session_state.jours_feries = sorted(st.session_state.jours_feries_list)
-                        st.rerun()
+        st.markdown("### 📅 Dates")
+        st.session_state.date_debut_val = st.date_input("Début", st.session_state.date_debut_val)
+        jf = st.text_area("Jours fériés (JJ/MM/AAAA)", placeholder="11/11/2026, 25/12/2026...")
+        if jf:
+            try: st.session_state.jours_feries = [datetime.strptime(d.strip(), "%d/%m/%Y").date() for d in jf.split(",") if d.strip()]
+            except: st.warning("Format invalide")
 
-        st.markdown("---")
-        st.info("💡 Vendredi et Samedi exclus. Dimanche est travaillable.")
-
-    tabs = st.tabs(["🏠 Accueil", "👥 Enseignants", "📚 Planning par Promotion", "🎯 Attributions", "📅 EDT par Promotion", "📊 Export Global"])
+    tabs = st.tabs(["🏠 Accueil", "👥 Enseignants", "🗓️ Planning Manuel", "🎯 Attributions", "📅 EDT Grille", "📊 Export"])
 
     with tabs[0]:
-        st.markdown(f"""
+        st.markdown("""
         <div class="info-box">
-            <h3>{TITRE_PLATEFORME}</h3>
-            <p><strong>Gestion des plannings d'examens et surveillances</strong> | Filtre: <b>Cours uniquement</b></p>
-            <ul>
-                <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
-                <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
-                <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
-                <li>🕐 <b>Logique multi-créneaux par jour</b> : plusieurs examens peuvent s'enchaîner le même jour sur des créneaux horaires différents.</li>
-                <li>🎉 <b>Sélection des jours fériés depuis le calendrier interactif</b></li>
+            <h3>✨ Plateforme de Gestion des EDTs</h3>
+            <p><strong>S2 - 2026</strong></p>
+            <ul style="text-align:left;">
+                <li>✅ Sélection MANUELLE des dates et horaires</li>
+                <li>✅ Pas de répartition automatique</li>
+                <li>✅ Possible d'avoir 2 examens le même jour à des créneaux différents</li>
+                <li>✅ Attribution intelligente des surveillants</li>
+                <li>✅ Export HTML, Excel, PDF</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
         if st.session_state.data_loaded:
-            c1, c2, c3, c4 = st.columns(4)
+            c1, c2, c3 = st.columns(3)
             with c1: st.metric("Enseignants", len(st.session_state.enseignants_df))
-            with c2: st.metric("Vacataires", len(st.session_state.vacataires_list))
-            with c3: st.metric("Cours filtrés", len(st.session_state.examens_df))
-            with c4: st.metric("Promotions", len(st.session_state.promotions_list))
+            with c2: st.metric("Cours", len(st.session_state.examens_df))
+            with c3: st.metric("Promotions", len(st.session_state.promotions_list))
 
     with tabs[1]:
-        st.markdown('<div class="sub-header">Gestion des Enseignants et Qualité</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">Gestion des Enseignants</div>', unsafe_allow_html=True)
         if st.session_state.data_loaded:
             df_ens = st.session_state.enseignants_df
-            all_ens = st.session_state.all_enseignants_list
-            exclus = st.multiselect("Sélectionner les enseignants à EXCLURE", sorted(all_ens), default=st.session_state.exclus_manuels, key="w_exclus")
+            all_ens = df_ens['nom'].unique().tolist()
+            exclus = st.multiselect("🚫 Exclure de la surveillance", sorted(all_ens), default=st.session_state.exclus_manuels)
             st.session_state.exclus_manuels = exclus
-            if not df_ens.empty:
-                disp_ens = df_ens[['nom', 'qualite', 'enseignements', 'promotion']].copy()
-                disp_ens['Exclu'] = disp_ens['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
-                disp_ens = disp_ens.sort_values(by=['qualite', 'nom'], ascending=[True, True])
-                st.dataframe(disp_ens, use_container_width=True, hide_index=True)
-        else: st.warning("Données non chargées.")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                perm_df = df_ens[df_ens['qualite'] == 'Permanent'][['nom']].copy()
+                st.markdown(f"#### 👔 Permanents: {len(perm_df)}")
+                st.dataframe(perm_df, use_container_width=True, hide_index=True)
+            with col2:
+                vac_df = df_ens[df_ens['qualite'] == 'Vacataire'][['nom']].copy()
+                st.markdown(f"#### 📝 Vacataires: {len(vac_df)}")
+                st.dataframe(vac_df, use_container_width=True, hide_index=True)
 
     with tabs[2]:
-        st.markdown('<div class="sub-header">Planification par Promotion (Multi-créneaux par jour)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">🗓️ Planning Manuel - Sélection Date + Horaire + Lieu</div>', unsafe_allow_html=True)
+        st.markdown("<div class='info-box'><b>✨ NOUVEAU</b> : Choisissez MANUELLEMENT la date et l'horaire de chaque examen. Aucune répartition automatique!</div>", unsafe_allow_html=True)
         
-        col_h1, col_h2 = st.columns([1, 4])
-        with col_h1:
-            if st.button("🗑️ Supprimer l'historique", type="secondary", key="btn_suppr_hist"):
-                st.session_state.historique_edt = {}
-                st.session_state.planning_df = None
-                st.session_state.surveillance_df = None
-                st.success("L'historique des EDTs a été supprimé avec succès.")
-                st.rerun()
-                
         if st.session_state.data_loaded and st.session_state.promotions_list:
-            promo_selected = st.selectbox("📚 Sélectionner une promotion", st.session_state.promotions_list, index=0, key="w_promo_sel")
-            st.session_state.promo_selected = promo_selected
+            promo_selected = st.selectbox("📚 Promotion", st.session_state.promotions_list, key="promo_planning")
+            
             if promo_selected:
-                col1, col2 = st.columns(2)
-                with col1: salles_sel = st.multiselect("Salles", SALLES, default=['S01', 'S02', 'S03', 'S04', 'S05'], key=f"w_sal_{promo_selected}")
-                with col2: amphis_sel = st.multiselect("Amphis", AMPHIS, default=['A01', 'A02', 'A03'], key=f"w_amp_{promo_selected}")
-                lieux_sel = salles_sel + amphis_sel
-                st.session_state.lieux_par_promo[promo_selected] = lieux_sel
+                # Générer les dates de travail disponibles
+                dates_dispo = generer_dates_travail(st.session_state.date_debut_val, nb_jours=30, jours_feries=st.session_state.jours_feries)
+                date_str_list = [d.strftime('%d/%m/%Y') for d in dates_dispo]
                 
-                st.markdown("#### 🕒 Personnalisation de la Date et de l'Horaire par Matière")
-                df_promo_matieres = st.session_state.examens_df[st.session_state.examens_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()]
+                # Créer le DataFrame pour édition manuelle
+                planning_df_edit = creer_planning_manuel_df(st.session_state.examens_df, promo_selected, dates_dispo)
                 
-                if not df_promo_matieres.empty:
-                    if promo_selected not in st.session_state.horaires_par_matiere:
-                        st.session_state.horaires_par_matiere[promo_selected] = {}
-                    if promo_selected not in st.session_state.jours_par_matiere:
-                        st.session_state.jours_par_matiere[promo_selected] = {}
+                if planning_df_edit is not None and not planning_df_edit.empty:
+                    st.markdown(f"#### Configurer les examens de {promo_selected}")
+                    st.markdown("**Choisissez pour chaque examen: Date, Horaire et Lieu**")
+                    
+                    # Éditer avec listes déroulantes
+                    planning_edited = st.data_editor(
+                        planning_df_edit,
+                        column_config={
+                            "Enseignements": st.column_config.TextColumn("Enseignement", disabled=True),
+                            "Enseignants": st.column_config.TextColumn("Enseignant", disabled=True),
+                            "Code": st.column_config.TextColumn("Code", disabled=True),
+                            "Date": st.column_config.SelectboxColumn("📅 Date", options=date_str_list),
+                            "Horaire": st.column_config.SelectboxColumn("⏰ Horaire", options=CRENEAUX),
+                            "Lieu": st.column_config.SelectboxColumn("📍 Lieu", options=SALLES + AMPHIS),
+                        },
+                        use_container_width=True,
+                        key=f"planning_editor_{promo_selected}"
+                    )
+                    
+                    if st.button("✅ Appliquer et Générer", type="primary", key="btn_apply_planning"):
+                        # Convertir les dates
+                        for idx in planning_edited.index:
+                            date_str = planning_edited.at[idx, 'Date']
+                            if date_str:
+                                planning_edited.at[idx, 'Date'] = datetime.strptime(date_str, "%d/%m/%Y").date()
                         
-                    for _, row_mat in df_promo_matieres.iterrows():
-                        m_nom = row_mat['Enseignements']
-                        col_m1, col_m2, col_m3 = st.columns([2, 1, 1])
-                        with col_m1:
-                            st.text(f"📖 {m_nom} (Resp: {row_mat['Enseignants']})")
-                        with col_m2:
-                            date_actuelle = st.session_state.jours_par_matiere.get(promo_selected, {}).get(m_nom, None)
-                            activer_date_fixe = st.checkbox(f"Date fixe - {m_nom}", value=(date_actuelle is not None), key=f"chk_date_{promo_selected}_{m_nom}")
-                            if activer_date_fixe:
-                                d_val = date_actuelle if isinstance(date_actuelle, date) else st.session_state.date_debut_val
-                                d_choisie = st.date_input(f"Date - {m_nom}", value=d_val, key=f"d_choisie_{promo_selected}_{m_nom}")
-                                st.session_state.jours_par_matiere.setdefault(promo_selected, {})[m_nom] = d_choisie
-                            else:
-                                if promo_selected in st.session_state.jours_par_matiere and m_nom in st.session_state.jours_par_matiere[promo_selected]:
-                                    del st.session_state.jours_par_matiere[promo_selected][m_nom]
-                        with col_m3:
-                            options_h = ["Automatique (Multi-créneaux)"] + CRENEAUX
-                            horaire_actuel = st.session_state.horaires_par_matiere.get(promo_selected, {}).get(m_nom, "Automatique (Multi-créneaux)")
-                            try:
-                                idx_h = options_h.index(horaire_actuel)
-                            except:
-                                idx_h = 0
-                            h_choisi = st.selectbox(f"Horaire - {m_nom}", options_h, index=idx_h, key=f"h_{promo_selected}_{m_nom}")
-                            if h_choisi != "Automatique (Multi-créneaux)":
-                                st.session_state.horaires_par_matiere.setdefault(promo_selected, {})[m_nom] = h_choisi
-                            else:
-                                if promo_selected in st.session_state.horaires_par_matiere and m_nom in st.session_state.horaires_par_matiere[promo_selected]:
-                                    del st.session_state.horaires_par_matiere[promo_selected][m_nom]
-                                
-                if st.button(f"🚀 Générer l'EDT pour {promo_selected}", type="primary", key=f"btn_gen_{promo_selected}"):
-                    if len(lieux_sel) == 0: st.error("❌ Sélectionnez au moins un lieu.")
-                    else:
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
+                        # Appliquer le planning
+                        planning_updated = appliquer_planning_manuel(st.session_state.examens_df, promo_selected, planning_edited)
                         
-                        total_promos = len(st.session_state.promotions_list)
-                        generated_count = 0
-                        
-                        for i, p_item in enumerate(st.session_state.promotions_list):
-                            time.sleep(0.2)
-                            ordre = st.session_state.ordre_matieres.get(p_item, None)
-                            horaires = st.session_state.horaires_par_matiere.get(p_item, None)
-                            jours_m = st.session_state.jours_par_matiere.get(p_item, None)
-                            
-                            if st.session_state.planning_df is None:
-                                st.session_state.planning_df = st.session_state.examens_df.copy()
-                                
-                            planning_promo = generer_planning_promo(st.session_state.planning_df, p_item, st.session_state.date_debut_val, st.session_state.jours_feries, CRENEAUX, lieux_sel, ordre, horaires, jours_m)
-                            if planning_promo is not None:
-                                st.session_state.planning_df = planning_promo
-                                st.session_state.historique_edt[p_item] = planning_promo[planning_promo['Promotion'].astype(str).str.strip() == str(p_item).strip()].to_dict('records')
-                            
-                            generated_count += 1
-                            progress_bar.progress(generated_count / total_promos)
-                            status_text.text(f"Progression : {generated_count} / {total_promos} promotions générées")
-                            
-                        st.success(f"✅ Génération multi-créneaux de tous les emplois du temps effectuée avec succès !")
-
-                if st.session_state.planning_df is not None:
-                    st.markdown("---")
-                    st.markdown(f"#### 📝 Planning actuel de la promotion sélectionnée : {promo_selected}")
-                    planning_display = st.session_state.planning_df[st.session_state.planning_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()].copy()
-                    if not planning_display.empty:
-                        st.dataframe(planning_display[['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'date']], use_container_width=True, hide_index=True)
-                    else:
-                        st.info(f"Aucun examen planifié pour {promo_selected} pour le moment. Cliquez sur le bouton de génération ci-dessus.")
-        else: st.warning("Aucune promotion détectée.")
+                        if planning_updated is not None:
+                            st.session_state.planning_df = planning_updated
+                            st.session_state.planning_manuel[promo_selected] = planning_edited.to_dict('records')
+                            st.success(f"✅ Planning de {promo_selected} configuré avec succès!")
+                            st.dataframe(planning_updated[planning_updated['Promotion'] == promo_selected][['Enseignements', 'Enseignants', 'date', 'Horaire', 'Jours', 'Lieu']], use_container_width=True, hide_index=True)
+                else:
+                    st.warning(f"Aucun examen pour {promo_selected}")
 
     with tabs[3]:
-        st.markdown('<div class="sub-header">Attribution des Surveillants (Vacataire en 2ème position)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">🎯 Attribution des Surveillants</div>', unsafe_allow_html=True)
         if st.session_state.planning_df is not None and st.session_state.enseignants_df is not None:
-            if st.button("🎯 Attribuer les Surveillants", type="primary", key="btn_attrib"):
-                with st.spinner("Attribution intelligente en cours..."):
+            if st.button("🎯 Attribuer les Surveillants", type="primary"):
+                with st.spinner("Attribution en cours..."):
                     attributions, ens_maj = attribuer_surveillants(st.session_state.planning_df, st.session_state.enseignants_df, st.session_state.nb_surv_par_lieu)
                     if attributions is not None:
                         st.session_state.surveillance_df = attributions
                         st.session_state.enseignants_df = ens_maj
-                        st.success(f"✅ {len(attributions)} attributions effectuées (Vacataire en 2e position garanti)!")
-                    else: st.error("❌ Erreur.")
+                        st.success(f"✅ {len(attributions)} attributions effectuées!")
+            
             if st.session_state.surveillance_df is not None:
                 st.markdown("---")
                 attr_data = []
                 for attr in st.session_state.surveillance_df:
-                    d = attr.get('date', None)
-                    ds = d.strftime('%d/%m/%Y') if hasattr(d, 'strftime') else str(d) if d else ''
-                    jour = JOURS_FR.get(d.strftime('%A'), d.strftime('%A')) if hasattr(d, 'strftime') else ''
                     for surv in attr.get('details_surveillants', []):
+                        d = attr.get('date', None)
+                        ds = d.strftime('%d/%m/%Y') if hasattr(d, 'strftime') else str(d) if d else ''
+                        jour = JOURS_FR.get(d.strftime('%A'), d.strftime('%A')) if hasattr(d, 'strftime') else ''
                         attr_data.append({
-                            'Enseignements': attr.get('matiere', ''),
-                            'Code': f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}",
-                            'Enseignants': attr.get('enseignant', ''),
+                            'Enseignement': attr.get('matiere', ''),
+                            'Enseignant': attr.get('enseignant', ''),
                             'Horaire': attr.get('creneau', ''),
-                            'Jours': jour,
+                            'Jour': jour,
                             'Lieu': attr.get('lieu', ''),
                             'Promotion': attr.get('promotion', ''),
                             'Date': ds,
                             'Surveillant': surv['nom'],
-                            'Qualité': surv['qualite'],
-                            'Rôle': 'Chargé de matière' if surv.get('priorite') == 'Charge de matiere' else surv['qualite']
+                            'Qualité': surv['qualite']
                         })
                 if attr_data:
                     st.dataframe(pd.DataFrame(attr_data), use_container_width=True, hide_index=True)
-        else: st.warning("Générez d'abord le planning.")
+        else:
+            st.warning("⚠️ Configurez d'abord le planning manuel")
 
     with tabs[4]:
-        st.markdown('<div class="sub-header">📅 EDT Chronologique en Grille par Promotion</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">📅 EDT Chronologique en Grille</div>', unsafe_allow_html=True)
         if st.session_state.surveillance_df is not None:
-            promo_sel_choisie = st.selectbox("🎯 Choisir la promotion à afficher et télécharger :", st.session_state.promotions_list, key="select_promo_unique_edt")
-            if promo_sel_choisie:
-                st.markdown(f"#### 🎓 Promotion: **{promo_sel_choisie}**")
-                attr_promo = [a for a in st.session_state.surveillance_df if str(a.get('promotion', '')).strip() == str(promo_sel_choisie).strip()]
-                if attr_promo:
-                    df_grille, _, _ = construire_grille_edt(attr_promo, CRENEAUX)
-                    if df_grille is not None and not df_grille.empty:
-                        st.dataframe(df_grille, use_container_width=True, hide_index=True)
-                        c1, c2, c3 = st.columns(3)
-                        with c1: st.download_button(f"⬇️ HTML - {promo_sel_choisie}", generer_html_edt(df_grille, promo_sel_choisie), f"EDT_{promo_sel_choisie}.html", "text/html", key=f"dl_html_{promo_sel_choisie}")
-                        with c2: st.download_button(f"⬇️ Excel - {promo_sel_choisie}", generer_excel_edt(df_grille, promo_sel_choisie), f"EDT_{promo_sel_choisie}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_xlsx_{promo_sel_choisie}")
-                        with c3: st.download_button(f"⬇️ PDF - {promo_sel_choisie}", generer_pdf_edt(attr_promo, promo_sel_choisie, CRENEAUX), f"EDT_{promo_sel_choisie}.pdf", "application/pdf", key=f"dl_pdf_{promo_sel_choisie}")
-                else:
-                    st.info(f"Aucune attribution trouvée pour la promotion {promo_sel_choisie}. Veuillez lancer l'attribution dans l'onglet 'Attributions'.")
-        else: st.warning("⚠️ Veuillez d'abord générer les attributions.")
+            promo_sel = st.selectbox("🎓 Promotion", st.session_state.promotions_list, key="sel_promo_edt")
+            attr_promo = [a for a in st.session_state.surveillance_df if str(a.get('promotion', '')).strip() == str(promo_sel).strip()]
+            
+            if attr_promo:
+                df_grille, _, _ = construire_grille_edt(attr_promo, CRENEAUX)
+                if df_grille is not None:
+                    st.dataframe(df_grille, use_container_width=True, hide_index=True)
+                    c1, c2, c3 = st.columns(3)
+                    with c1: st.download_button("⬇️ HTML", generer_html_edt(df_grille, promo_sel), f"EDT_{promo_sel}.html", "text/html", key="dl_html")
+                    with c2: st.download_button("⬇️ Excel", generer_excel_edt(df_grille, promo_sel), f"EDT_{promo_sel}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_xlsx")
+                    with c3: st.download_button("⬇️ PDF", generer_pdf_edt(attr_promo, promo_sel, CRENEAUX), f"EDT_{promo_sel}.pdf", "application/pdf", key="dl_pdf")
+            else:
+                st.info("Aucune attribution pour cette promotion")
+        else:
+            st.warning("⚠️ Effectuez d'abord l'attribution")
 
     with tabs[5]:
-        st.markdown('<div class="sub-header">Export Global Chronologique</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">📊 Export Global</div>', unsafe_allow_html=True)
         if st.session_state.surveillance_df is not None:
             attributions = st.session_state.surveillance_df
-            col1, col2, col3 = st.columns(3)
-            with col1: st.download_button("⬇️ Télécharger HTML", generer_tableau_html(attributions), "planning_surveillances.html", "text/html", key="dl_gh")
-            with col2: st.download_button("⬇️ Télécharger Excel", generer_excel_colore(attributions), "planning_surveillances.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.spreadsheet", key="dl_gx")
-            with col3: st.download_button("⬇️ Télécharger PDF", generer_pdf(attributions), "planning_surveillances.pdf", "application/pdf", key="dl_gp")
+            c1, c2, c3 = st.columns(3)
+            with c1: st.download_button("⬇️ HTML", generer_tableau_html(attributions), "planning.html", "text/html", key="dl_gh")
+            with c2: st.download_button("⬇️ Excel", generer_excel_colore(attributions), "planning.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_gx")
+            with c3: st.download_button("⬇️ PDF", generer_pdf(attributions), "planning.pdf", "application/pdf", key="dl_gp")
             st.markdown("---")
             st.markdown(generer_tableau_html(attributions), unsafe_allow_html=True)
-        else: st.warning("Aucune attribution à exporter.")
+        else:
+            st.warning("Aucune attribution à exporter")
 
 if __name__ == "__main__":
     main()
