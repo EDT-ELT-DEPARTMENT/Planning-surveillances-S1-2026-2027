@@ -890,6 +890,16 @@ def main():
                                 st.session_state.horaires_par_matiere.setdefault(promo_selected, {})[m_nom] = h_choisi
                             elif m_nom in st.session_state.horaires_par_matiere.get(promo_selected, {}):
                                 del st.session_state.horaires_par_matiere[promo_selected][m_nom]
+                # Exemple dans votre interface (par exemple dans main() ou dans la section de planification par promotion)
+            if st.button("Lancer la génération"): # Remplacez par le nom réel de votre bouton s'il diffère
+                import traceback
+                try:
+                    # Mettez ici votre appel de fonction réel (ex: generer_planning_promotion(...) ou équivalent)
+                    generer_planning_promotion() 
+                    st.success("Génération réussie !")
+                except Exception as e:
+                    st.error(f"Erreur détaillée : {e}")
+                    st.text(traceback.format_exc())
                 
                 if st.button(f"🚀 Générer le Planning uniquement pour {promo_selected}", type="primary", key=f"btn_gen_{promo_selected}"):
                     if len(lieux_sel) == 0: st.error("❌ Sélectionnez au moins un lieu.")
