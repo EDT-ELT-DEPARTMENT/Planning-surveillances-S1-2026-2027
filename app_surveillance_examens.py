@@ -893,9 +893,7 @@ def main():
                 # Exemple dans votre interface (par exemple dans main() ou dans la section de planification par promotion)
             if st.button("Lancer la génération"): # Remplacez par le nom réel de votre bouton s'il diffère
                 import traceback
-                try:
-                    
-                    generer_planning_promo()
+                try:                 
                     generer_planning_promo(
                         examens_df=df_examens,       # Remplacez par le nom de votre variable de DataFrame
                         promotion=selected_promo,     # La variable contenant la promotion choisie (ex: M1ME)
