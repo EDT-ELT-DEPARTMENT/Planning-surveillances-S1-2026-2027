@@ -1,3 +1,4 @@
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import streamlit as st
 import pandas as pd
 import numpy as np
