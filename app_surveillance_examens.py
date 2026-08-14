@@ -502,7 +502,7 @@ def generer_html_edt(df_grille, promotion):
         .sep {{ border-top: 1px dashed #ccc; margin: 4px 0; }}
     </style>
     <h2 style="color:#1565C0; text-align:center;">{TITRE_PLATEFORME}</h2>
-    <h3 style="color:#333; text-align:center;">EDT Chronologique - Promotion {promotion}</h3>
+    <h3 style="color:#333; text-align:center;">Promotion {promotion}</h3>
     <table class="edt-table">
     """
     html += "<tr><th>Creneau / Horaire</th>"
@@ -546,7 +546,7 @@ def generer_pdf_edt(attributions, promotion, creneaux_liste):
     subtitle_style = ParagraphStyle('SubTitle', parent=styles['Normal'], alignment=1, fontSize=10, textColor=colors.HexColor('#333333'), spaceAfter=10)
     
     elements.append(Paragraph(TITRE_PLATEFORME, title_style))
-    elements.append(Paragraph(f"EDT Chronologique - Promotion {promotion}", subtitle_style))
+    elements.append(Paragraph(f"Promotion {promotion}", subtitle_style))
     elements.append(Spacer(1, 0.2*cm))
     
     creneaux_actifs = st.session_state.get('creneaux_actifs', CRENEAUX_DEFAUT)
