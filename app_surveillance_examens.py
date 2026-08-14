@@ -1,4 +1,3 @@
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -13,7 +12,6 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.units import cm
 import os
 import re
-import time
 
 TITRE_PLATEFORME = "Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA"
 
@@ -41,13 +39,12 @@ def init_session_state():
     defaults = {
         'enseignants_df': None, 'examens_df': None, 'planning_df': None,
         'surveillance_df': None, 'nb_surv_permanent': 3, 'nb_surv_vacataire': 2,
-        'nb_surv_autre': 1, 'nb_surv_par_lieu': 2, 'exclus_manuels': [],
-        'date_debut_val': date(2026, 11, 1), 'date_fin_val': date(2026, 11, 15), 'nb_par_jour': 2, 'jours_feries': [],
-        'promo_selected': None, 'data_loaded': False, 'promotions_list': [],
-        'permanents_list': [], 'vacataires_list': [], 'all_enseignants_list': [],
-        'ordre_matieres': {}, 'lieux_par_promo': {},
-        'horaires_par_matiere': {}, 'jours_par_matiere': {}, 'edt_par_promo': {},
-        'historique_edt': {}, 'creneaux_actifs': CRENEAUX_DEFAUT
+        'nb_surv_autre': 1, 'nb_surv_par_salle': 2, 'nb_surv_par_amphi': 3,
+        'exclus_manuels': [], 'date_debut_val': date(2026, 11, 1), 'date_fin_val': date(2026, 11, 15),
+        'nb_par_jour': 2, 'jours_feries': [], 'promo_selected': None, 'data_loaded': False,
+        'promotions_list': [], 'permanents_list': [], 'vacataires_list': [], 'all_enseignants_list': [],
+        'ordre_matieres': {}, 'lieux_par_promo': {}, 'horaires_par_matiere': {}, 'jours_par_matiere': {},
+        'fractionnement_actif': {}, 'groupes_par_promo': {}, 'historique_edt': {}, 'creneaux_actifs': CRENEAUX_DEFAUT
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -173,16 +170,17 @@ def charger_fichier_source_auto():
                         'qualite_ens': row.get('qualite', 'Permanent'),
                         'Horaire': CRENEAUX_DEFAUT[0], 'Jours': None, 'Lieu': None,
                         'Promotion': str(row.get('Promotion', '')).strip(),
+                        'Groupe': 'Global',
                         'ordre': 999
                     })
         df_exam = pd.DataFrame(examens_data)
-        colonnes_attendues = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion']
+        colonnes_attendues = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']
         for col in colonnes_attendues:
             if col not in df_exam.columns:
                 df_exam[col] = ''
                 
-        df_exam = df_exam.drop_duplicates(subset=['Enseignements', 'Promotion', 'Enseignants']).copy()
-        df_exam = df_exam.sort_values('Enseignants').drop_duplicates(subset=['Enseignements', 'Promotion'], keep='first').copy()
+        df_exam = df_exam.drop_duplicates(subset=['Enseignements', 'Promotion', 'Groupe', 'Enseignants']).copy()
+        df_exam = df_exam.sort_values('Enseignants').drop_duplicates(subset=['Enseignements', 'Promotion', 'Groupe'], keep='first').copy()
         promotions = sorted(df_exam['Promotion'].dropna().astype(str).str.strip().unique().tolist()) if not df_exam.empty else []
         promotions = [p for p in promotions if p != '']
         
@@ -223,7 +221,7 @@ def est_jour_travaille(date_obj, jours_feries):
             return False
     return True
 
-def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_jour, jours_feries, creneaux, lieux, ordre_matieres=None, horaires_matiere=None, jours_matiere=None):
+def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_jour, jours_feries, creneaux, lieux, ordre_matieres=None, horaires_matiere=None, jours_matiere=None, groupes_actifs=None):
     if examens_df is None or examens_df.empty:
         return None
     
@@ -231,6 +229,10 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
     promo_df = df_working[df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()].copy()
     if promo_df.empty:
         return examens_df
+        
+    # Gestion du fractionnement / filtrage par groupe
+    if groupes_actifs and len(groupes_actifs) > 0 and 'Groupe' in promo_df.columns:
+        promo_df = promo_df[promo_df['Groupe'].isin(groupes_actifs + ['Global'])].copy()
     
     if ordre_matieres and promotion in ordre_matieres:
         ordre_map = {m: i for i, m in enumerate(ordre_matieres[promotion])}
@@ -295,10 +297,14 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
         examens_par_jour_count[date_examen] = examens_par_jour_count.get(date_examen, 0) + 1
         lieu = lieux[lieu_idx % nb_lieux]
         
-        df_working.loc[(df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (df_working['Enseignements'] == matiere_nom), 'date'] = date_examen
-        df_working.loc[(df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (df_working['Enseignements'] == matiere_nom), 'Horaire'] = creneau
-        df_working.loc[(df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (df_working['Enseignements'] == matiere_nom), 'Jours'] = JOURS_FR.get(date_examen.strftime("%A"), date_examen.strftime("%A"))
-        df_working.loc[(df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (df_working['Enseignements'] == matiere_nom), 'Lieu'] = lieu
+        mask_m = (df_working['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (df_working['Enseignements'] == matiere_nom)
+        if 'Groupe' in df_working.columns and promo_df.loc[i, 'Groupe'] in df_working['Groupe'].values:
+            mask_m = mask_m & (df_working['Groupe'] == promo_df.loc[i, 'Groupe'])
+
+        df_working.loc[mask_m, 'date'] = date_examen
+        df_working.loc[mask_m, 'Horaire'] = creneau
+        df_working.loc[mask_m, 'Jours'] = JOURS_FR.get(date_examen.strftime("%A"), date_examen.strftime("%A"))
+        df_working.loc[mask_m, 'Lieu'] = lieu
         
         lieu_idx += 1
         if not d_ex:
@@ -306,7 +312,7 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
             
     return df_working
 
-def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
+def attribuer_surveillants(planning_df, enseignants_df):
     if planning_df is None or enseignants_df is None:
         return None, enseignants_df
     surveillants = enseignants_df.copy()
@@ -327,9 +333,14 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
         enseignant_matiere = examen.get('Enseignants', '')
         lieu_examen = examen.get('Lieu', 'S01')
         promotion_examen = examen.get('Promotion', '')
+        groupe_examen = examen.get('Groupe', 'Global')
         
         if date_examen is None or pd.isna(date_examen):
             continue
+            
+        # Détermination dynamique du quota de surveillance selon le type de lieu (Salle vs Amphi)
+        is_amphi = str(lieu_examen).strip().upper().startswith('A')
+        nb_surv_requis = st.session_state.get('nb_surv_par_amphi', 3) if is_amphi else st.session_state.get('nb_surv_par_salle', 2)
             
         surveillants_occupes = set()
         for attr in attributions:
@@ -376,7 +387,7 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                     surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'] += 1
                     break
                     
-        if nb_par_lieu >= 2 and len(liste_surveillants) == 1:
+        if nb_surv_requis >= 2 and len(liste_surveillants) == 1:
             vacataire_trouve = False
             for _, vac in vacataires.iterrows():
                 if vac['nom'] in surveillants_occupes or vac['nom'] in exclus: continue
@@ -398,7 +409,7 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                         surveillants.loc[surveillants['nom'] == perm['nom'], 'surveillance_attribuee'] += 1
                         break
 
-        while len(liste_surveillants) < nb_par_lieu:
+        while len(liste_surveillants) < nb_surv_requis:
             assigned_added = False
             for _, aut in autres.iterrows():
                 if aut['nom'] in surveillants_occupes or aut['nom'] in exclus: continue
@@ -414,8 +425,8 @@ def attribuer_surveillants(planning_df, enseignants_df, nb_par_lieu=2):
                 
         attributions.append({
             'date': date_examen, 'creneau': creneau_examen, 'matiere': matiere_examen,
-            'enseignant': enseignant_matiere, 'promotion': promotion_examen, 'lieu': lieu_examen,
-            'surveillants': [s['nom'] for s in liste_surveillants], 'details_surveillants': liste_surveillants
+            'enseignant': enseignant_matiere, 'promotion': promotion_examen, 'groupe': groupe_examen,
+            'lieu': lieu_examen, 'surveillants': [s['nom'] for s in liste_surveillants], 'details_surveillants': liste_surveillants
         })
         
     creneaux_actifs = st.session_state.get('creneaux_actifs', CRENEAUX_DEFAUT)
@@ -444,12 +455,13 @@ def construire_grille_edt(attributions, creneaux_liste):
         if creneau not in grille[cle_jour]: grille[cle_jour][creneau] = []
         survs = attr.get('details_surveillants', [])
         surv_text = "\n".join([f"• {s['nom']} ({s['qualite']})" for s in survs])
+        grp_str = f" [Grp: {attr.get('groupe', 'Global')}]" if attr.get('groupe') and attr.get('groupe') != 'Global' else ""
         grille[cle_jour][creneau].append({
             'matiere': attr.get('matiere', ''), 
             'enseignant': attr.get('enseignant', ''),
             'lieu': attr.get('lieu', ''), 
             'surveillants': surv_text, 
-            'promotion': attr.get('promotion', ''),
+            'promotion': f"{attr.get('promotion', '')}{grp_str}",
             'creneau': creneau,
             'date': date_str
         })
@@ -682,7 +694,8 @@ def generer_tableau_html(attributions, creneaux_utilises):
                 for examen in planning_par_jour[jour][creneau]:
                     survs = examen.get('details_surveillants', [])
                     surv_html = "<br>".join([f"<span>{s['nom']} ({s['qualite']}{'*' if s.get('priorite') == 'Charge de matiere' else ''})</span>" for s in survs])
-                    html += f"<div class='examen-cell'><strong>{examen.get('matiere', '')}</strong><br><small>Promo: {examen.get('promotion', '')} | Lieu: {examen.get('lieu', '')}</small><br><small>Chargé: {examen.get('enseignant', '')}</small><br><small>{surv_html}</small></div>"
+                    grp_info = f" | Grp: {examen.get('groupe', 'Global')}" if examen.get('groupe') and examen.get('groupe') != 'Global' else ""
+                    html += f"<div class='examen-cell'><strong>{examen.get('matiere', '')}</strong><br><small>Promo: {examen.get('promotion', '')}{grp_info} | Lieu: {examen.get('lieu', '')}</small><br><small>Chargé: {examen.get('enseignant', '')}</small><br><small>{surv_html}</small></div>"
             html += "</td>"
         html += "</tr>"
     html += "</table>"
@@ -710,11 +723,12 @@ def generer_excel_colore(attributions):
             'Jours': jour, 
             'Lieu': attr.get('lieu', ''), 
             'Promotion': attr.get('promotion', ''),
+            'Groupe': attr.get('groupe', 'Global'),
             'Date': date_str,
             'Surveillants': surv_str
         })
     df = pd.DataFrame(data)
-    cols_order = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Date', 'Surveillants']
+    cols_order = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe', 'Date', 'Surveillants']
     df = df[[c for c in cols_order if c in df.columns]]
     
     header_fill = PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid")
@@ -751,7 +765,7 @@ def generer_pdf(attributions):
     elements.append(Paragraph(TITRE_PLATEFORME, title_style))
     elements.append(Paragraph("PLANNING CHRONOLOGIQUE DES SURVEILLANCES", styles['Heading2']))
     elements.append(Spacer(1, 0.3*cm))
-    table_data = [['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Date', 'Surveillants']]
+    table_data = [['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe', 'Date', 'Surveillants']]
     for attr in attributions:
         date_val = attr.get('date', None)
         if hasattr(date_val, 'strftime'):
@@ -769,6 +783,7 @@ def generer_pdf(attributions):
             jour, 
             attr.get('lieu', ''), 
             attr.get('promotion', ''), 
+            attr.get('groupe', 'Global'),
             date_str, 
             surv_str
         ])
@@ -845,11 +860,15 @@ def main():
             st.session_state.creneaux_actifs = CRENEAUX_DEFAUT
 
         st.markdown("---")
-        st.markdown("### 📊 Quotas")
+        st.markdown("### 📊 Quotas de Surveillance")
         st.session_state.nb_surv_permanent = st.number_input("Permanent", 0, 20, st.session_state.nb_surv_permanent, key="w_qp")
         st.session_state.nb_surv_vacataire = st.number_input("Vacataire", 0, 20, st.session_state.nb_surv_vacataire, key="w_qv")
         st.session_state.nb_surv_autre = st.number_input("Autre", 0, 20, st.session_state.nb_surv_autre, key="w_qa")
-        st.session_state.nb_surv_par_lieu = st.number_input("Surv. par lieu", 1, 5, st.session_state.nb_surv_par_lieu, key="w_nl")
+        
+        st.markdown("#### 🏛️ Quotas par Type de Lieu")
+        st.session_state.nb_surv_par_salle = st.number_input("Surv. par Salle", 1, 5, st.session_state.nb_surv_par_salle, key="w_ns")
+        st.session_state.nb_surv_par_amphi = st.number_input("Surv. par Amphi", 1, 5, st.session_state.nb_surv_par_amphi, key="w_na")
+
         st.markdown("---")
         st.markdown("### 📅 Période & Cadence")
         st.session_state.date_debut_val = st.date_input("Date début", st.session_state.date_debut_val, key="w_dd")
@@ -897,9 +916,9 @@ def main():
                 <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>⏰ <b>Créneaux par défaut intégrés en permanence dans la colonne Horaire</b></li>
-                <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
+                <li>🎯 Quotas différenciés : <b>Surv. par Salle</b> vs <b>Surv. par Amphi</b></li>
+                <li>🔀 <b>Gestion du fractionnement des promotions</b> (Sous-groupes / Sections)</li>
                 <li>🛠️ <b>Sélection manuelle et fonction d'édition sécurisée anti-férié / anti-weekend</b></li>
-                <li>🎉 <b>Sélection des jours fériés depuis le calendrier interactif</b></li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -928,7 +947,7 @@ def main():
         else: st.warning("Données non chargées.")
 
     with tabs[2]:
-        st.markdown('<div class="sub-header">Planification par Promotion (Sélection manuelle et Édition)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">Planification, Fractionnement & Cohérence par Promotion</div>', unsafe_allow_html=True)
         
         col_h1, col_h2 = st.columns([1, 4])
         with col_h1:
@@ -942,7 +961,20 @@ def main():
         if st.session_state.data_loaded and st.session_state.promotions_list:
             promo_selected = st.selectbox("📚 Sélectionner une promotion", st.session_state.promotions_list, index=0, key="w_promo_sel")
             st.session_state.promo_selected = promo_selected
+            
             if promo_selected:
+                # Module de Fractionnement des promotions
+                st.markdown("#### 🔀 Gestion du Fractionnement / Sous-groupes")
+                fractionner = st.checkbox(f"Activer le fractionnement (Sous-groupes) pour {promo_selected}", value=st.session_state.fractionnement_actif.get(promo_selected, False), key=f"chk_frac_{promo_selected}")
+                st.session_state.fractionnement_actif[promo_selected] = fractionner
+                
+                groupes_actifs = ['Global']
+                if fractionner:
+                    groupes_saisis = st.text_input(f"Définir les sous-groupes (séparés par des virgules) pour {promo_selected}", value=", ".join(st.session_state.groupes_par_promo.get(promo_selected, ['Grp 1', 'Grp 2'])), key=f"txt_groupes_{promo_selected}")
+                    groupes_actifs = [g.strip() for g in groupes_saisis.split(',') if g.strip()]
+                    st.session_state.groupes_par_promo[promo_selected] = groupes_actifs
+                    st.info(f"💡 Cohérence de fractionnement active : Les examens seront planifiés en cohérence avec les sous-groupes ({', '.join(groupes_actifs)}), évitant les conflits simultanés sur la même fraction.")
+                
                 col1, col2 = st.columns(2)
                 with col1: salles_sel = st.multiselect("Salles", SALLES, default=['S01', 'S02', 'S03', 'S04', 'S05'], key=f"w_sal_{promo_selected}")
                 with col2: amphis_sel = st.multiselect("Amphis", AMPHIS, default=['A01', 'A02', 'A03'], key=f"w_amp_{promo_selected}")
@@ -993,7 +1025,23 @@ def main():
                     else:
                         if st.session_state.planning_df is None:
                             st.session_state.planning_df = st.session_state.examens_df.copy()
+                            if 'Groupe' not in st.session_state.planning_df.columns:
+                                st.session_state.planning_df['Groupe'] = 'Global'
                             
+                        # Expansion du DataFrame en cas de fractionnement actif pour cohérence des sous-groupes
+                        if fractionner and groupes_actifs:
+                            # S'assurer que les lignes de base ont des sous-groupes affectés si non présents
+                            base_rows = []
+                            for _, r in st.session_state.examens_df[st.session_state.examens_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()].iterrows():
+                                for g in groupes_actifs:
+                                    r_copy = r.copy()
+                                    r_copy['Groupe'] = g
+                                    base_rows.append(r_copy)
+                            df_frac = pd.DataFrame(base_rows)
+                            # Remplacer / fusionner dans planning_df
+                            st.session_state.planning_df = st.session_state.planning_df[st.session_state.planning_df['Promotion'].astype(str).str.strip() != str(promo_selected).strip()]
+                            st.session_state.planning_df = pd.concat([st.session_state.planning_df, df_frac], ignore_index=True)
+
                         ordre = st.session_state.ordre_matieres.get(promo_selected, None)
                         horaires = st.session_state.horaires_par_matiere.get(promo_selected, None)
                         jours_m = st.session_state.jours_par_matiere.get(promo_selected, None)
@@ -1010,13 +1058,14 @@ def main():
                             lieux_p, 
                             ordre, 
                             horaires, 
-                            jours_m
+                            jours_m,
+                            groupes_actifs if fractionner else None
                         )
                         if df_updated is not None:
                             st.session_state.planning_df = df_updated
                             promo_subset = df_updated[df_updated['Promotion'].astype(str).str.strip() == str(promo_selected).strip()]
                             st.session_state.historique_edt[promo_selected] = promo_subset.to_dict('records')
-                            st.success(f"✅ Génération effectuée avec succès pour la promotion {promo_selected} !")
+                            st.success(f"✅ Génération avec cohérence de fractionnement effectuée pour la promotion {promo_selected} !")
 
                 if st.session_state.planning_df is not None:
                     st.markdown("---")
@@ -1025,7 +1074,7 @@ def main():
                     
                     planning_display = st.session_state.planning_df[st.session_state.planning_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()].copy()
                     if not planning_display.empty:
-                        colonnes_edition = ["Enseignements", "date", "Horaire", "Lieu", "Enseignants", "Promotion"]
+                        colonnes_edition = ["Enseignements", "Groupe", "date", "Horaire", "Lieu", "Enseignants", "Promotion"]
                         for col_c in colonnes_edition:
                             if col_c not in planning_display.columns:
                                 planning_display[col_c] = ""
@@ -1065,6 +1114,7 @@ def main():
                             if not erreur_detectee:
                                 for idx_ed, row_ed in df_edit_result.iterrows():
                                     m_nom = row_ed['Enseignements']
+                                    g_nom = row_ed['Groupe']
                                     new_date = row_ed['date']
                                     new_horaire = row_ed['Horaire']
                                     new_lieu = row_ed['Lieu']
@@ -1072,6 +1122,9 @@ def main():
                                     new_promo = row_ed['Promotion']
                                     
                                     mask = (st.session_state.planning_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()) & (st.session_state.planning_df['Enseignements'] == m_nom)
+                                    if 'Groupe' in st.session_state.planning_df.columns:
+                                        mask = mask & (st.session_state.planning_df['Groupe'] == g_nom)
+
                                     st.session_state.planning_df.loc[mask, 'date'] = new_date
                                     st.session_state.planning_df.loc[mask, 'Horaire'] = new_horaire
                                     st.session_state.planning_df.loc[mask, 'Lieu'] = new_lieu
@@ -1090,13 +1143,13 @@ def main():
         st.markdown('<div class="sub-header">Attribution des Surveillants et Édition</div>', unsafe_allow_html=True)
         if st.session_state.planning_df is not None and st.session_state.enseignants_df is not None:
             if st.button("🎯 Attribuer les Surveillants", type="primary", key="btn_attrib"):
-                with st.spinner("Attribution intelligente en cours..."):
-                    attributions, ens_maj = attribuer_surveillants(st.session_state.planning_df, st.session_state.enseignants_df, st.session_state.nb_surv_par_lieu)
+                with st.spinner("Attribution intelligente en cours (avec quotas différenciés Salle / Amphi)..."):
+                    attributions, ens_maj = attribuer_surveillants(st.session_state.planning_df, st.session_state.enseignants_df)
                     if attributions is not None:
                         st.session_state.surveillance_df = attributions
                         st.session_state.enseignants_df = ens_maj
-                        st.success(f"✅ {len(attributions)} attributions effectuées !")
-                    else: st.error("❌ Erreur.")
+                        st.success(f"✅ {len(attributions)} attributions effectuées avec succès !")
+                    else: st.error("❌ Erreur lors de l'attribution.")
             if st.session_state.surveillance_df is not None:
                 st.markdown("---")
                 attr_data = []
@@ -1113,6 +1166,7 @@ def main():
                         'Jours': jour,
                         'Lieu': attr.get('lieu', ''),
                         'Promotion': attr.get('promotion', ''),
+                        'Groupe': attr.get('groupe', 'Global'),
                         'Date': ds,
                         'Surveillants': surv_noms
                     })
@@ -1165,6 +1219,7 @@ def main():
                                 'matiere': row_a['Enseignements'],
                                 'enseignant': row_a['Enseignants'],
                                 'promotion': row_a['Promotion'],
+                                'groupe': row_a['Groupe'],
                                 'lieu': row_a['Lieu'],
                                 'surveillants': noms_surv_list,
                                 'details_surveillants': details_surv
