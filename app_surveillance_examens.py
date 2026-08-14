@@ -31,7 +31,7 @@ p, div, span, th, td { text-align: center !important; }
 </style>
 """, unsafe_allow_html=True)
 
-SALLES = [f"S{i:02d}" for i in range(1, 18)]
+SALLES = [f"S{i:02d}" for i in range(1, 19)]  # S01 à S18
 AMPHIS = [f"A{i:02d}" for i in range(1, 13)]
 CRENEAUX = ["08h30 - 10h30", "11h00 - 13h00", "13h30 - 15h30"]
 JOURS_FR = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi", "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
@@ -664,69 +664,152 @@ def main():
         st.markdown('<div class="sub-header">Gestion des Enseignants</div>', unsafe_allow_html=True)
         if st.session_state.data_loaded:
             df_ens = st.session_state.enseignants_df
-            all_ens = df_ens['nom'].unique().tolist()
-            exclus = st.multiselect("🚫 Exclure de la surveillance", sorted(all_ens), default=st.session_state.exclus_manuels)
+            # Compter les noms UNIQUES (pas les doublons)
+            all_ens_uniq = df_ens['nom'].unique().tolist()
+            perm_uniq = df_ens[df_ens['qualite'] == 'Permanent']['nom'].unique()
+            vac_uniq = df_ens[df_ens['qualite'] == 'Vacataire']['nom'].unique()
+            
+            st.markdown(f"#### 📊 Résumé")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("👔 Permanents (uniques)", len(perm_uniq))
+            with c2:
+                st.metric("📝 Vacataires (uniques)", len(vac_uniq))
+            with c3:
+                st.metric("👥 Total (uniques)", len(all_ens_uniq))
+            
+            st.markdown("---")
+            exclus = st.multiselect("🚫 Exclure de la surveillance", sorted(all_ens_uniq), default=st.session_state.exclus_manuels)
             st.session_state.exclus_manuels = exclus
             
-            col1, col2 = st.columns(2)
-            with col1:
-                perm_df = df_ens[df_ens['qualite'] == 'Permanent'][['nom']].copy()
-                st.markdown(f"#### 👔 Permanents: {len(perm_df)}")
-                st.dataframe(perm_df, use_container_width=True, hide_index=True)
-            with col2:
-                vac_df = df_ens[df_ens['qualite'] == 'Vacataire'][['nom']].copy()
-                st.markdown(f"#### 📝 Vacataires: {len(vac_df)}")
-                st.dataframe(vac_df, use_container_width=True, hide_index=True)
+            if exclus:
+                st.warning(f"❌ Exclus: {', '.join(exclus)}")
 
     with tabs[2]:
         st.markdown('<div class="sub-header">🗓️ Planning Manuel - Sélection Date + Horaire + Lieu</div>', unsafe_allow_html=True)
-        st.markdown("<div class='info-box'><b>✨ NOUVEAU</b> : Choisissez MANUELLEMENT la date et l'horaire de chaque examen. Aucune répartition automatique!</div>", unsafe_allow_html=True)
+        st.markdown("<div class='info-box'><b>✨ NOUVEAU</b> : Choisissez MANUELLEMENT la date (calendrier), l'horaire (3 créneaux) et le lieu (Salles ou Amphithéâtres). Aucune répartition automatique!</div>", unsafe_allow_html=True)
         
         if st.session_state.data_loaded and st.session_state.promotions_list:
             promo_selected = st.selectbox("📚 Promotion", st.session_state.promotions_list, key="promo_planning")
             
             if promo_selected:
-                # Générer les dates de travail disponibles
-                dates_dispo = generer_dates_travail(st.session_state.date_debut_val, nb_jours=30, jours_feries=st.session_state.jours_feries)
-                date_str_list = [d.strftime('%d/%m/%Y') for d in dates_dispo]
-                
                 # Créer le DataFrame pour édition manuelle
-                planning_df_edit = creer_planning_manuel_df(st.session_state.examens_df, promo_selected, dates_dispo)
+                promo_df = st.session_state.examens_df[st.session_state.examens_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()].copy()
                 
-                if planning_df_edit is not None and not planning_df_edit.empty:
+                if promo_df is not None and not promo_df.empty:
                     st.markdown(f"#### Configurer les examens de {promo_selected}")
-                    st.markdown("**Choisissez pour chaque examen: Date, Horaire et Lieu**")
+                    st.markdown("**Choisissez pour chaque examen: 📅 Date (Calendrier) | ⏰ Horaire (3 créneaux) | 📍 Lieu (Salle OU Amphi)**")
+                    st.markdown("---")
                     
-                    # Éditer avec listes déroulantes
-                    planning_edited = st.data_editor(
-                        planning_df_edit,
-                        column_config={
-                            "Enseignements": st.column_config.TextColumn("Enseignement", disabled=True),
-                            "Enseignants": st.column_config.TextColumn("Enseignant", disabled=True),
-                            "Code": st.column_config.TextColumn("Code", disabled=True),
-                            "Date": st.column_config.SelectboxColumn("📅 Date", options=date_str_list),
-                            "Horaire": st.column_config.SelectboxColumn("⏰ Horaire", options=CRENEAUX),
-                            "Lieu": st.column_config.SelectboxColumn("📍 Lieu", options=SALLES + AMPHIS),
-                        },
-                        use_container_width=True,
-                        key=f"planning_editor_{promo_selected}"
-                    )
+                    # Stockage des sélections
+                    planning_selections = {}
                     
-                    if st.button("✅ Appliquer et Générer", type="primary", key="btn_apply_planning"):
-                        # Convertir les dates
-                        for idx in planning_edited.index:
-                            date_str = planning_edited.at[idx, 'Date']
-                            if date_str:
-                                planning_edited.at[idx, 'Date'] = datetime.strptime(date_str, "%d/%m/%Y").date()
+                    # Créer une ligne par examen avec inputs personnalisés
+                    for idx, (_, exam) in enumerate(promo_df.iterrows()):
+                        enseignement = exam.get('Enseignements', '')
+                        enseignant = exam.get('Enseignants', '')
+                        code = exam.get('Code', '')
                         
-                        # Appliquer le planning
-                        planning_updated = appliquer_planning_manuel(st.session_state.examens_df, promo_selected, planning_edited)
+                        # Créer un expander pour chaque examen
+                        with st.expander(f"📚 {enseignement} - {enseignant}", expanded=(idx==0)):
+                            col_info, col_config = st.columns([2, 3])
+                            
+                            # Infos (lecture seule)
+                            with col_info:
+                                st.markdown(f"**Enseignement**: {enseignement}")
+                                st.markdown(f"**Enseignant**: {enseignant}")
+                                st.markdown(f"**Code**: {code}")
+                            
+                            # Configuration (inputs)
+                            with col_config:
+                                st.markdown("**Configuration**")
+                                
+                                # Calendrier pour la date
+                                date_exam = st.date_input(
+                                    "📅 Sélectionner la date",
+                                    value=st.session_state.date_debut_val,
+                                    min_value=st.session_state.date_debut_val,
+                                    max_value=st.session_state.date_debut_val + timedelta(days=60),
+                                    key=f"date_{promo_selected}_{idx}"
+                                )
+                                
+                                # Horaires (3 créneaux)
+                                horaire = st.selectbox(
+                                    "⏰ Sélectionner l'horaire",
+                                    CRENEAUX,
+                                    key=f"horaire_{promo_selected}_{idx}"
+                                )
+                                
+                                # Lieu: Deux colonnes (Salles + Amphis)
+                                lieu_col1, lieu_col2 = st.columns(2)
+                                
+                                with lieu_col1:
+                                    salle = st.selectbox(
+                                        "🏫 Salle (S01-S18)",
+                                        [""] + SALLES,
+                                        key=f"salle_{promo_selected}_{idx}"
+                                    )
+                                
+                                with lieu_col2:
+                                    amphi = st.selectbox(
+                                        "🎓 Amphithéâtre (A01-A12)",
+                                        [""] + AMPHIS,
+                                        key=f"amphi_{promo_selected}_{idx}"
+                                    )
+                                
+                                # Vérifier qu'au moins un lieu est sélectionné
+                                if salle == "" and amphi == "":
+                                    st.warning("⚠️ Sélectionnez au moins un lieu (Salle OU Amphi)")
+                                    lieu_final = None
+                                elif salle != "" and amphi != "":
+                                    st.error("❌ Choisissez SOIT une Salle SOIT un Amphi, pas les deux!")
+                                    lieu_final = None
+                                else:
+                                    lieu_final = salle if salle != "" else amphi
+                                    st.success(f"✅ Lieu sélectionné: {lieu_final}")
+                                
+                                # Stocker les sélections
+                                planning_selections[enseignement] = {
+                                    'date': date_exam,
+                                    'horaire': horaire,
+                                    'lieu': lieu_final
+                                }
+                    
+                    st.markdown("---")
+                    
+                    if st.button("✅ Appliquer et Générer", type="primary", key="btn_apply_planning", use_container_width=True):
+                        # Vérifier que toutes les sélections sont valides
+                        invalides = [m for m, sel in planning_selections.items() if sel['lieu'] is None]
                         
-                        if planning_updated is not None:
-                            st.session_state.planning_df = planning_updated
-                            st.session_state.planning_manuel[promo_selected] = planning_edited.to_dict('records')
-                            st.success(f"✅ Planning de {promo_selected} configuré avec succès!")
-                            st.dataframe(planning_updated[planning_updated['Promotion'] == promo_selected][['Enseignements', 'Enseignants', 'date', 'Horaire', 'Jours', 'Lieu']], use_container_width=True, hide_index=True)
+                        if invalides:
+                            st.error(f"❌ Veuillez sélectionner un lieu pour: {', '.join(invalides)}")
+                        else:
+                            # Créer le planning édité
+                            planning_edited = []
+                            for enseignement, sels in planning_selections.items():
+                                planning_edited.append({
+                                    'Enseignements': enseignement,
+                                    'Date': sels['date'],
+                                    'Horaire': sels['horaire'],
+                                    'Lieu': sels['lieu']
+                                })
+                            
+                            planning_edited_df = pd.DataFrame(planning_edited)
+                            
+                            # Appliquer le planning
+                            planning_updated = appliquer_planning_manuel(st.session_state.examens_df, promo_selected, planning_edited_df)
+                            
+                            if planning_updated is not None:
+                                st.session_state.planning_df = planning_updated
+                                st.session_state.planning_manuel[promo_selected] = planning_edited_df.to_dict('records')
+                                st.success(f"✅ Planning de {promo_selected} configuré avec succès!")
+                                
+                                # Afficher le planning appliqué
+                                st.markdown("---")
+                                st.markdown("#### 📋 Planning Appliqué")
+                                result_df = planning_updated[planning_updated['Promotion'] == promo_selected][['Enseignements', 'Enseignants', 'date', 'Horaire', 'Jours', 'Lieu']].copy()
+                                result_df.columns = ['Enseignement', 'Enseignant', 'Date', 'Horaire', 'Jour', 'Lieu']
+                                st.dataframe(result_df, use_container_width=True, hide_index=True)
                 else:
                     st.warning(f"Aucun examen pour {promo_selected}")
 
