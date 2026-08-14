@@ -895,7 +895,7 @@ def main():
                 import traceback
                 try:
                     # Mettez ici votre appel de fonction réel (ex: generer_planning_promotion(...) ou équivalent)
-                    generer_planning_promotion() 
+                    generer_planning_promo() 
                     st.success("Génération réussie !")
                 except Exception as e:
                     st.error(f"Erreur détaillée : {e}")
