@@ -60,10 +60,21 @@ def enlever_accents(input_str):
 
 def normaliser_qualite(val):
     val_clean = str(val).strip().lower()
-    # On cherche explicitement le mot vacataire peu importe les majuscules/accents
     if 'vacataire' in val_clean or 'vac' in val_clean:
         return 'Vacataire'
     return 'Permanent'
+
+def est_cours(item_str):
+    """Vérifie si l'élément correspond à un cours (commence par Cours ou contient Cours)."""
+    item_clean = str(item_str).strip().lower()
+    return 'cours' in item_clean
+
+def extraire_nom_cours(item_str):
+    """Extrait et nettoie le nom du cours en supprimant le préfixe 'Cours-' ou similaire."""
+    item_str = str(item_str).strip()
+    # Supprime un préfixe éventuel du type 'Cours-', 'Cours : ', etc.
+    item_ nettoyé = re.sub(r'^(cours[\s\-\:]*)', '', item_str, flags=re.IGNORECASE)
+    return item_nettoyé.strip() if item_nettoyé else item_str
 
 def charger_fichier_source_auto():
     try:
@@ -85,10 +96,8 @@ def charger_fichier_source_auto():
         df_ens = pd.read_excel(file_path, sheet_name=ens_sheet)
         df_ens.columns = [str(col).strip() for col in df_ens.columns]
         
-        # Identification automatique de la colonne Qualité par son contenu si le nom ne correspond pas
         col_qualite_trouvee = None
         for col in df_ens.columns:
-            # Si la colonne contient les mots 'Vacataire' ou 'Permanent' dans ses premières lignes
             echantillon = df_ens[col].dropna().astype(str).str.lower().tolist()
             if any('vacataire' in x for x in echantillon):
                 col_qualite_trouvee = col
@@ -108,19 +117,18 @@ def charger_fichier_source_auto():
             elif any(x in c for x in ['promotion', 'niveau', 'annee', 'class', 'promo', 'niveaux']):
                 col_map['promotion'] = cols_orig[i]
                 
-        # Si la colonne qualité n'a pas été trouvée par son nom, on force celle détectée par son contenu
         if col_qualite_trouvee and ('qualite' not in col_map or not col_map['qualite']):
             col_map['qualite'] = col_qualite_trouvee
 
         rename_map = {}
         if 'nom' in col_map: rename_map[col_map['nom']] = 'nom'
         if 'qualite' in col_map: rename_map[col_map['qualite']] = 'qualite'
-        if 'enseignements' in col_map: rename_map[col_map['enseignements']] = 'enseignements'
+        if 'enseignements' in col_map: rename_map[col_map['enseignements']] = 'ContenuMatière' # Mis à jour conformément aux directives
         if 'promotion' in col_map: rename_map[col_map['promotion']] = 'promotion'
         
         df_ens = df_ens.rename(columns=rename_map)
         
-        for col in ['qualite', 'enseignements', 'promotion']:
+        for col in ['qualite', 'ContenuMatière', 'promotion']:
             if col not in df_ens.columns:
                 df_ens[col] = ''
                 
@@ -128,7 +136,7 @@ def charger_fichier_source_auto():
         df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)      
         examens_data = []
         for _, row in df_ens.iterrows():
-            raw_ens = str(row.get('enseignements', ''))
+            raw_ens = str(row.get('ContenuMatière', ''))
             items = re.split(r'[,;/]+', raw_ens)
             for item in items:
                 item = item.strip()
@@ -815,7 +823,7 @@ def main():
             exclus = st.multiselect("Sélectionner les enseignants à EXCLURE", sorted(all_ens), default=st.session_state.exclus_manuels, key="w_exclus")
             st.session_state.exclus_manuels = exclus
             if not df_ens.empty:
-                disp_ens = df_ens[['nom', 'qualite', 'enseignements', 'promotion']].copy()
+                disp_ens = df_ens[['nom', 'qualite', 'ContenuMatière', 'promotion']].copy()
                 disp_ens['Exclu'] = disp_ens['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
                 disp_ens = disp_ens.sort_values(by=['qualite', 'nom'], ascending=[True, True])
                 st.dataframe(disp_ens, use_container_width=True, hide_index=True)
