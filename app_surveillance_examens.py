@@ -9,6 +9,7 @@ import io
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 import os
 import re
@@ -845,7 +846,6 @@ def main():
                             horaires = st.session_state.horaires_par_matiere.get(promo_selected, None)
                             jours_m = st.session_state.jours_par_matiere.get(promo_selected, None)
                             
-                            # Initialisation du planning global s'il n'existe pas
                             if st.session_state.planning_df is None:
                                 st.session_state.planning_df = st.session_state.examens_df.copy()
                                 
@@ -904,19 +904,20 @@ def main():
     with tabs[4]:
         st.markdown('<div class="sub-header">📅 EDT Chronologique en Grille par Promotion</div>', unsafe_allow_html=True)
         if st.session_state.surveillance_df is not None:
-            promos_dans_attr = sorted(list(set([attr.get('promotion', '') for attr in st.session_state.surveillance_df if attr.get('promotion', '')])))
-            for promo in promos_dans_attr:
-                with st.container():
-                    st.markdown(f"#### 🎓 Promotion: **{promo}**")
-                    attr_promo = [a for a in st.session_state.surveillance_df if a.get('promotion', '') == promo]
-                    if attr_promo:
-                        df_grille, _, _ = construire_grille_edt(attr_promo, CRENEAUX)
-                        if df_grille is not None and not df_grille.empty:
-                            st.dataframe(df_grille, use_container_width=True, hide_index=True)
-                            c1, c2, c3 = st.columns(3)
-                            with c1: st.download_button(f"⬇️ HTML - {promo}", generer_html_edt(df_grille, promo), f"EDT_{promo}.html", "text/html", key=f"dl_html_{promo}")
-                            with c2: st.download_button(f"⬇️ Excel - {promo}", generer_excel_edt(df_grille, promo), f"EDT_{promo}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_xlsx_{promo}")
-                            with c3: st.download_button(f"⬇️ PDF - {promo}", generer_pdf_edt(attr_promo, promo, CRENEAUX), f"EDT_{promo}.pdf", "application/pdf", key=f"dl_pdf_{promo}")
+            promo_sel_choisie = st.selectbox("🎯 Choisir la promotion à afficher et télécharger :", st.session_state.promotions_list, key="select_promo_unique_edt")
+            if promo_sel_choisie:
+                st.markdown(f"#### 🎓 Promotion: **{promo_sel_choisie}**")
+                attr_promo = [a for a in st.session_state.surveillance_df if str(a.get('promotion', '')).strip() == str(promo_sel_choisie).strip()]
+                if attr_promo:
+                    df_grille, _, _ = construire_grille_edt(attr_promo, CRENEAUX)
+                    if df_grille is not None and not df_grille.empty:
+                        st.dataframe(df_grille, use_container_width=True, hide_index=True)
+                        c1, c2, c3 = st.columns(3)
+                        with c1: st.download_button(f"⬇️ HTML - {promo_sel_choisie}", generer_html_edt(df_grille, promo_sel_choisie), f"EDT_{promo_sel_choisie}.html", "text/html", key=f"dl_html_{promo_sel_choisie}")
+                        with c2: st.download_button(f"⬇️ Excel - {promo_sel_choisie}", generer_excel_edt(df_grille, promo_sel_choisie), f"EDT_{promo_sel_choisie}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_xlsx_{promo_sel_choisie}")
+                        with c3: st.download_button(f"⬇️ PDF - {promo_sel_choisie}", generer_pdf_edt(attr_promo, promo_sel_choisie, CRENEAUX), f"EDT_{promo_sel_choisie}.pdf", "application/pdf", key=f"dl_pdf_{promo_sel_choisie}")
+                else:
+                    st.info(f"Aucune attribution trouvée pour la promotion {promo_sel_choisie}. Veuillez lancer l'attribution dans l'onglet 'Attributions'.")
         else: st.warning("⚠️ Veuillez d'abord générer les attributions.")
 
     with tabs[5]:
