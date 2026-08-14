@@ -14,7 +14,7 @@ from reportlab.lib.units import cm
 import os
 import re
 
-# Titre officiel rappelé conformément aux consignes
+# Titre officiel rappelé conformément aux consignes[cite: 2]
 TITRE_PLATEFORME = "Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA"
 
 st.set_page_config(page_title=TITRE_PLATEFORME, page_icon="📋", layout="wide", initial_sidebar_state="expanded")
@@ -890,23 +890,7 @@ def main():
                                 st.session_state.horaires_par_matiere.setdefault(promo_selected, {})[m_nom] = h_choisi
                             elif m_nom in st.session_state.horaires_par_matiere.get(promo_selected, {}):
                                 del st.session_state.horaires_par_matiere[promo_selected][m_nom]
-                # Exemple dans votre interface (par exemple dans main() ou dans la section de planification par promotion)
-            if st.button("Lancer la génération"): # Remplacez par le nom réel de votre bouton s'il diffère
-                import traceback
-                try:                 
-                    generer_planning_promo(
-                        examens_df=st.session_state.examens_df,       # Remplacez par le nom de votre variable de DataFrame
-                        promotion=selected_promo,     # La variable contenant la promotion choisie (ex: M1ME)
-                        date_debut=date_debut,        # La date de début sélectionnée
-                        jours_feries=jours_feries,    # La liste des jours fériés
-                        creneaux=creneaux_choisis,    # Les créneaux horaires sélectionnés dans l'interface
-                        lieux=lieux_choisis           # Les salles/amphis sélectionnés
-                    )
-                    st.success("Génération réussie !")
-                except Exception as e:
-                    st.error(f"Erreur détaillée : {e}")
-                    st.text(traceback.format_exc())
-                
+                                
                 if st.button(f"🚀 Générer le Planning uniquement pour {promo_selected}", type="primary", key=f"btn_gen_{promo_selected}"):
                     if len(lieux_sel) == 0: st.error("❌ Sélectionnez au moins un lieu.")
                     elif len(creneaux_sel) == 0: st.error("❌ Sélectionnez au moins un créneau.")
