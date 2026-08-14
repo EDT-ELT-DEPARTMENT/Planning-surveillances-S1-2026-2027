@@ -13,6 +13,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.units import cm
 import os
 import re
+import time
 
 # Titre officiel rappelé conformément aux consignes[cite: 2]
 TITRE_PLATEFORME = "Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA"
@@ -46,7 +47,8 @@ def init_session_state():
         'promo_selected': None, 'data_loaded': False, 'promotions_list': [],
         'permanents_list': [], 'vacataires_list': [], 'all_enseignants_list': [],
         'ordre_matieres': {}, 'lieux_par_promo': {},
-        'horaires_par_matiere': {}, 'jours_par_matiere': {}, 'edt_par_promo': {}
+        'horaires_par_matiere': {}, 'jours_par_matiere': {}, 'edt_par_promo': {},
+        'historique_edt': {}
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -221,12 +223,12 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
         st.error("Veuillez selectionner au moins un creneau.")
         return None
         
-    idx = 0
     lieu_idx = 0
     
     for i in promo_df.index:
         matiere_nom = promo_df.at[i, 'Enseignements']
         
+        # RÈGLE DOMINANTE : Date fixe et Horaire explicite assignés directement sans alternance
         date_pref = jours_matiere.get(promotion, {}).get(matiere_nom) if jours_matiere else None
         if date_pref:
             if isinstance(date_pref, datetime):
@@ -240,7 +242,8 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
             date_courante += timedelta(days=1)
             
         creneau_pref = horaires_matiere.get(promotion, {}).get(matiere_nom) if horaires_matiere else None
-        creneau = creneau_pref if creneau_pref and creneau_pref in creneaux_dispo else creneaux_dispo[idx % nb_creneaux]
+        creneau = creneau_pref if creneau_pref and creneau_pref != "Par défaut" else creneaux_dispo[0]
+        
         lieu = lieux[lieu_idx % nb_lieux]
         
         examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'date'] = date_examen
@@ -248,7 +251,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
         examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Jours'] = JOURS_FR.get(date_examen.strftime("%A"), date_examen.strftime("%A"))
         examens_df.loc[(examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()) & (examens_df['Enseignements'] == matiere_nom), 'Lieu'] = lieu
         
-        idx += 1
         lieu_idx += 1
             
     planning_promo_result = examens_df[examens_df['Promotion'].astype(str).str.strip() == str(promotion).strip()].sort_values(by=['date', 'Horaire', 'Lieu'])
@@ -822,7 +824,7 @@ def main():
                 <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
-                <li>🕐 <b>Choix de la date exacte et de l'horaire par matière</b> (par promotion isolée)</li>
+                <li>🕐 <b>Choix de la date fixe et de l'horaire précis par matière</b> (sans alternance indésirable)</li>
                 <li>🎉 <b>Sélection des jours fériés depuis le calendrier interactif</b></li>
             </ul>
         </div>
@@ -849,7 +851,18 @@ def main():
         else: st.warning("Données non chargées.")
 
     with tabs[2]:
-        st.markdown('<div class="sub-header">Planification par Promotion (Génération indépendante)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">Planification par Promotion (Génération avec Barre de Progression)</div>', unsafe_allow_html=True)
+        
+        # Bouton global de suppression de l'historique demandé
+        col_h1, col_h2 = st.columns([1, 4])
+        with col_h1:
+            if st.button("🗑️ Supprimer l'historique", type="secondary", key="btn_suppr_hist"):
+                st.session_state.historique_edt = {}
+                st.session_state.planning_df = None
+                st.session_state.surveillance_df = None
+                st.success("L'historique des EDTs a été supprimé avec succès.")
+                st.rerun()
+                
         if st.session_state.data_loaded and st.session_state.promotions_list:
             promo_selected = st.selectbox("📚 Sélectionner une promotion", st.session_state.promotions_list, index=0, key="w_promo_sel")
             st.session_state.promo_selected = promo_selected
@@ -861,7 +874,7 @@ def main():
                 lieux_sel = salles_sel + amphis_sel
                 st.session_state.lieux_par_promo[promo_selected] = lieux_sel
                 
-                st.markdown("#### 🕒 Personnalisation de la Date exacte et de l'Horaire par Matière")
+                st.markdown("#### 🕒 Personnalisation de la Date fixe et de l'Horaire strict par Matière (Priorité Dominante)")
                 df_promo_matieres = st.session_state.examens_df[st.session_state.examens_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()]
                 
                 if not df_promo_matieres.empty:
@@ -891,23 +904,35 @@ def main():
                             elif m_nom in st.session_state.horaires_par_matiere.get(promo_selected, {}):
                                 del st.session_state.horaires_par_matiere[promo_selected][m_nom]
                                 
-                if st.button(f"🚀 Générer le Planning uniquement pour {promo_selected}", type="primary", key=f"btn_gen_{promo_selected}"):
+                if st.button(f"🚀 Générer l'EDT pour {promo_selected}", type="primary", key=f"btn_gen_{promo_selected}"):
                     if len(lieux_sel) == 0: st.error("❌ Sélectionnez au moins un lieu.")
                     elif len(creneaux_sel) == 0: st.error("❌ Sélectionnez au moins un créneau.")
                     else:
-                        with st.spinner(f"Génération chronologique exclusive pour {promo_selected}..."):
-                            ordre = st.session_state.ordre_matieres.get(promo_selected, None)
-                            horaires = st.session_state.horaires_par_matiere.get(promo_selected, None)
-                            jours_m = st.session_state.jours_par_matiere.get(promo_selected, None)
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        total_promos = len(st.session_state.promotions_list)
+                        generated_count = 0
+                        
+                        for i, p_item in enumerate(st.session_state.promotions_list):
+                            time.sleep(0.2)
+                            ordre = st.session_state.ordre_matieres.get(p_item, None)
+                            horaires = st.session_state.horaires_par_matiere.get(p_item, None)
+                            jours_m = st.session_state.jours_par_matiere.get(p_item, None)
                             
                             if st.session_state.planning_df is None:
                                 st.session_state.planning_df = st.session_state.examens_df.copy()
                                 
-                            planning_promo = generer_planning_promo(st.session_state.planning_df, promo_selected, st.session_state.date_debut_val, st.session_state.jours_feries, creneaux_sel, lieux_sel, ordre, horaires, jours_m)
+                            planning_promo = generer_planning_promo(st.session_state.planning_df, p_item, st.session_state.date_debut_val, st.session_state.jours_feries, creneaux_sel, lieux_sel, ordre, horaires, jours_m)
                             if planning_promo is not None:
                                 st.session_state.planning_df = planning_promo
-                                st.success(f"✅ Planning généré et mis à jour exclusivement pour la promotion **{promo_selected}** !")
-                            else: st.error("❌ Erreur de génération.")
+                                st.session_state.historique_edt[p_item] = planning_promo[planning_promo['Promotion'].astype(str).str.strip() == str(p_item).strip()].to_dict('records')
+                            
+                            generated_count += 1
+                            progress_bar.progress(generated_count / total_promos)
+                            status_text.text(f"Progression : {generated_count} / {total_promos} promotions générées")
+                            
+                        st.success(f"✅ Génération de tous les emplois du temps effectuée avec succès !")
 
                 if st.session_state.planning_df is not None:
                     st.markdown("---")
