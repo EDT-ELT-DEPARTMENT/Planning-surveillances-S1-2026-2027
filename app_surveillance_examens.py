@@ -228,7 +228,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
     for i in promo_df.index:
         matiere_nom = promo_df.at[i, 'Enseignements']
         
-        # Récupération de la date fixe si configurée
         date_pref = jours_matiere.get(promotion, {}).get(matiere_nom) if jours_matiere else None
         if date_pref:
             if isinstance(date_pref, datetime):
@@ -243,7 +242,6 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
         else:
             d_ex = None
             
-        # Récupération de l'horaire fixe si configuré
         creneau_pref = horaires_matiere.get(promotion, {}).get(matiere_nom) if horaires_matiere else None
         
         if d_ex and creneau_pref:
@@ -861,7 +859,7 @@ def main():
                 <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
-                <li>🕐 <b>Logique multi-créneaux par jour</b> : plusieurs examens peuvent s'enchaîner le même jour sur des créneaux horaires différents.</li>
+                <li>🛠️ <b>Sélection manuelle par matière</b> activée</li>
                 <li>🎉 <b>Sélection des jours fériés depuis le calendrier interactif</b></li>
             </ul>
         </div>
@@ -888,7 +886,7 @@ def main():
         else: st.warning("Données non chargées.")
 
     with tabs[2]:
-        st.markdown('<div class="sub-header">Planification par Promotion (Multi-créneaux par jour)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">Planification par Promotion (Sélection manuelle par matière)</div>', unsafe_allow_html=True)
         
         col_h1, col_h2 = st.columns([1, 4])
         with col_h1:
@@ -934,14 +932,14 @@ def main():
                                 if promo_selected in st.session_state.jours_par_matiere and m_nom in st.session_state.jours_par_matiere[promo_selected]:
                                     del st.session_state.jours_par_matiere[promo_selected][m_nom]
                         with col_m3:
-                            options_h = ["Automatique (Multi-créneaux)"] + CRENEAUX
-                            horaire_actuel = st.session_state.horaires_par_matiere.get(promo_selected, {}).get(m_nom, "Automatique (Multi-créneaux)")
+                            options_h = ["Sélection manuelle"] + CRENEAUX
+                            horaire_actuel = st.session_state.horaires_par_matiere.get(promo_selected, {}).get(m_nom, "Sélection manuelle")
                             try:
                                 idx_h = options_h.index(horaire_actuel)
                             except:
                                 idx_h = 0
                             h_choisi = st.selectbox(f"Horaire - {m_nom}", options_h, index=idx_h, key=f"h_{promo_selected}_{m_nom}")
-                            if h_choisi != "Automatique (Multi-créneaux)":
+                            if h_choisi != "Sélection manuelle":
                                 st.session_state.horaires_par_matiere.setdefault(promo_selected, {})[m_nom] = h_choisi
                             else:
                                 if promo_selected in st.session_state.horaires_par_matiere and m_nom in st.session_state.horaires_par_matiere[promo_selected]:
@@ -974,14 +972,16 @@ def main():
                             progress_bar.progress(generated_count / total_promos)
                             status_text.text(f"Progression : {generated_count} / {total_promos} promotions générées")
                             
-                        st.success(f"✅ Génération multi-créneaux de tous les emplois du temps effectuée avec succès !")
+                        st.success(f"✅ Génération par sélection manuelle effectuée avec succès !")
 
                 if st.session_state.planning_df is not None:
                     st.markdown("---")
                     st.markdown(f"#### 📝 Planning actuel de la promotion sélectionnée : {promo_selected}")
                     planning_display = st.session_state.planning_df[st.session_state.planning_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()].copy()
                     if not planning_display.empty:
-                        st.dataframe(planning_display[['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'date']], use_container_width=True, hide_index=True)
+                        # Respect de la disposition demandée : Enseignements, Code, Enseignants, Horaire, Jours, Lieu, Promotion
+                        colonnes_ordre = ["Enseignements", "Code", "Enseignants", "Horaire", "Jours", "Lieu", "Promotion"]
+                        st.dataframe(planning_display[[c for c in colonnes_ordre if c in planning_display.columns]], use_container_width=True, hide_index=True)
                     else:
                         st.info(f"Aucun examen planifié pour {promo_selected} pour le moment. Cliquez sur le bouton de génération ci-dessus.")
         else: st.warning("Aucune promotion détectée.")
@@ -1045,7 +1045,7 @@ def main():
         st.markdown('<div class="sub-header">📂 Répertoire des EDTs & Téléchargements (Individuel & Groupé)</div>', unsafe_allow_html=True)
         
         nb_generes = len(st.session_state.historique_edt) if 'historique_edt' in st.session_state else 0
-        total_promos_attendu = 23
+        total_promos_attendu = len(st.session_state.promotions_list) if st.session_state.promotions_list else 23
         
         st.markdown(f"""
         <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 20px;">
