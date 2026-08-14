@@ -34,7 +34,7 @@ p, div, span, th, td { text-align: center !important; }
 
 SALLES = [f"S{i:02d}" for i in range(1, 18)]
 AMPHIS = [f"A{i:02d}" for i in range(1, 13)]
-CRENEAUX = ["08h30 - 10h30", "11h00 - 13h00", "13h30 - 15h30"]
+CRENEAUX = ["08h30 - 10h30"]
 JOURS_FR = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi", "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
 FICHIER_SOURCE = "DATA-ENS-2026-2027_surveillances.xlsx"
 
