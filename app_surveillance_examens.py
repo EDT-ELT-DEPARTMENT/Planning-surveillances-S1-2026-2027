@@ -858,7 +858,7 @@ def main():
                 <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
-                <li>🛠️ <b>Sélection manuelle par matière</b> activée</li>
+                <li>🛠️ <b>Sélection manuelle et fonction d'édition directe</b> intégrées</li>
                 <li>🎉 <b>Sélection des jours fériés depuis le calendrier interactif</b></li>
             </ul>
         </div>
@@ -885,7 +885,7 @@ def main():
         else: st.warning("Données non chargées.")
 
     with tabs[2]:
-        st.markdown('<div class="sub-header">Planification par Promotion (Sélection manuelle par matière)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">Planification par Promotion (Sélection manuelle et Édition)</div>', unsafe_allow_html=True)
         
         col_h1, col_h2 = st.columns([1, 4])
         with col_h1:
@@ -954,7 +954,7 @@ def main():
                         generated_count = 0
                         
                         for i, p_item in enumerate(st.session_state.promotions_list):
-                            time.sleep(0.2)
+                            time.sleep(0.1)
                             ordre = st.session_state.ordre_matieres.get(p_item, None)
                             horaires = st.session_state.horaires_par_matiere.get(p_item, None)
                             jours_m = st.session_state.jours_par_matiere.get(p_item, None)
@@ -983,21 +983,52 @@ def main():
                             progress_bar.progress(generated_count / total_promos)
                             status_text.text(f"Progression : {generated_count} / {total_promos} promotions générées")
                             
-                        st.success(f"✅ Génération par sélection manuelle effectuée avec succès !")
+                        st.success(f"✅ Génération effectuée avec succès !")
 
                 if st.session_state.planning_df is not None:
                     st.markdown("---")
-                    st.markdown(f"#### 📝 Planning actuel de la promotion sélectionnée : {promo_selected}")
+                    st.markdown(f"#### 📝 Édition directe du Planning de la promotion : {promo_selected}")
+                    
                     planning_display = st.session_state.planning_df[st.session_state.planning_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()].copy()
                     if not planning_display.empty:
-                        colonnes_ordre = ["Enseignements", "Code", "Enseignants", "Horaire", "Jours", "Lieu", "Promotion"]
-                        st.dataframe(planning_display[[c for c in colonnes_ordre if c in planning_display.columns]], use_container_width=True, hide_index=True)
+                        # Widget st.data_editor pour éditer directement les champs (Date, Horaire, Lieu, Enseignants)
+                        colonnes_edition = ["Enseignements", "date", "Horaire", "Lieu", "Enseignants"]
+                        for col_c in colonnes_edition:
+                            if col_c not in planning_display.columns:
+                                planning_display[col_c] = ""
+                                
+                        df_edit_result = st.data_editor(
+                            planning_display[colonnes_edition],
+                            key=f"editor_planning_{promo_selected}",
+                            use_container_width=True,
+                            hide_index=True,
+                            num_rows="fixed"
+                        )
+                        
+                        if st.button("💾 Enregistrer les modifications du planning", type="primary", key=f"btn_save_edit_{promo_selected}"):
+                            for idx_ed, row_ed in df_edit_result.iterrows():
+                                m_nom = row_ed['Enseignements']
+                                new_date = row_ed['date']
+                                new_horaire = row_ed['Horaire']
+                                new_lieu = row_ed['Lieu']
+                                new_ens = row_ed['Enseignants']
+                                
+                                mask = (st.session_state.planning_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()) & (st.session_state.planning_df['Enseignements'] == m_nom)
+                                st.session_state.planning_df.loc[mask, 'date'] = new_date
+                                st.session_state.planning_df.loc[mask, 'Horaire'] = new_horaire
+                                st.session_state.planning_df.loc[mask, 'Lieu'] = new_lieu
+                                st.session_state.planning_df.loc[mask, 'Enseignants'] = new_ens
+                                if isinstance(new_date, (date, datetime)):
+                                    st.session_state.planning_df.loc[mask, 'Jours'] = JOURS_FR.get(new_date.strftime("%A"), new_date.strftime("%A"))
+                                    
+                            st.success("✅ Modifications enregistrées avec succès dans le planning de la promotion !")
+                            st.rerun()
                     else:
-                        st.info(f"Aucun examen planifié pour {promo_selected} pour le moment. Cliquez sur le bouton de génération ci-dessus.")
+                        st.info(f"Aucun examen planifié pour {promo_selected}.")
         else: st.warning("Aucune promotion détectée.")
 
     with tabs[3]:
-        st.markdown('<div class="sub-header">Attribution des Surveillants (Vacataire en 2ème position)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">Attribution des Surveillants et Édition</div>', unsafe_allow_html=True)
         if st.session_state.planning_df is not None and st.session_state.enseignants_df is not None:
             if st.button("🎯 Attribuer les Surveillants", type="primary", key="btn_attrib"):
                 with st.spinner("Attribution intelligente en cours..."):
@@ -1005,7 +1036,7 @@ def main():
                     if attributions is not None:
                         st.session_state.surveillance_df = attributions
                         st.session_state.enseignants_df = ens_maj
-                        st.success(f"✅ {len(attributions)} attributions effectuées (Vacataire en 2e position garanti)!")
+                        st.success(f"✅ {len(attributions)} attributions effectuées !")
                     else: st.error("❌ Erreur.")
             if st.session_state.surveillance_df is not None:
                 st.markdown("---")
@@ -1014,22 +1045,53 @@ def main():
                     d = attr.get('date', None)
                     ds = d.strftime('%d/%m/%Y') if hasattr(d, 'strftime') else str(d) if d else ''
                     jour = JOURS_FR.get(d.strftime('%A'), d.strftime('%A')) if hasattr(d, 'strftime') else ''
-                    for surv in attr.get('details_surveillants', []):
-                        attr_data.append({
-                            'Enseignements': attr.get('matiere', ''),
-                            'Code': f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}",
-                            'Enseignants': attr.get('enseignant', ''),
-                            'Horaire': attr.get('creneau', ''),
-                            'Jours': jour,
-                            'Lieu': attr.get('lieu', ''),
-                            'Promotion': attr.get('promotion', ''),
-                            'Date': ds,
-                            'Surveillant': surv['nom'],
-                            'Qualité': surv['qualite'],
-                            'Rôle': 'Chargé de matière' if surv.get('priorite') == 'Charge de matiere' else surv['qualite']
-                        })
+                    surv_noms = ", ".join([s['nom'] for s in attr.get('details_surveillants', [])])
+                    attr_data.append({
+                        'Enseignements': attr.get('matiere', ''),
+                        'Code': f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}",
+                        'Enseignants': attr.get('enseignant', ''),
+                        'Horaire': attr.get('creneau', ''),
+                        'Jours': jour,
+                        'Lieu': attr.get('lieu', ''),
+                        'Promotion': attr.get('promotion', ''),
+                        'Date': ds,
+                        'Surveillants': surv_noms
+                    })
                 if attr_data:
-                    st.dataframe(pd.DataFrame(attr_data), use_container_width=True, hide_index=True)
+                    df_attr_display = pd.DataFrame(attr_data)
+                    st.markdown("#### 📝 Tableau des attributions (Édition des surveillants/lieux/horaires)")
+                    df_edit_att = st.data_editor(df_attr_display, use_container_width=True, hide_index=True, key="editor_attributions")
+                    
+                    if st.button("💾 Mettre à jour les attributions modifiées", type="primary", key="btn_save_att"):
+                        new_surv_df = []
+                        for idx_a, row_a in df_edit_att.iterrows():
+                            # Reconstruire la liste des surveillants à partir de la chaîne éditée
+                            noms_surv_list = [s.strip() for s in str(row_a['Surveillants']).split(',') if s.strip()]
+                            details_surv = []
+                            for n_s in noms_surv_list:
+                                # Retrouver la qualité de l'enseignant
+                                q_match = st.session_state.enseignants_df[st.session_state.enseignants_df['nom'].str.strip() == n_s]
+                                q_val = q_match.iloc[0]['qualite'] if not q_match.empty else 'Permanent'
+                                details_surv.append({'nom': n_s, 'qualite': q_val, 'priorite': 'Permanent'})
+                                
+                            try:
+                                parsed_date = datetime.strptime(row_a['Date'], '%d/%m/%Y').date()
+                            except:
+                                parsed_date = date(2026, 11, 1)
+                                
+                            new_surv_df.append({
+                                'date': parsed_date,
+                                'creneau': row_a['Horaire'],
+                                'matiere': row_a['Enseignements'],
+                                'enseignant': row_a['Enseignants'],
+                                'promotion': row_a['Promotion'],
+                                'lieu': row_a['Lieu'],
+                                'surveillants': noms_surv_list,
+                                'details_surveillants': details_surv
+                            })
+                        st.session_state.surveillance_df = new_surv_df
+                        st.success("✅ Attributions mises à jour avec succès !")
+                        st.rerun()
         else: st.warning("Générez d'abord le planning.")
 
     with tabs[4]:
@@ -1048,7 +1110,7 @@ def main():
                         with c2: st.download_button(f"⬇️ Excel - {promo_sel_choisie}", generer_excel_edt(df_grille, promo_sel_choisie), f"EDT_{promo_sel_choisie}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_xlsx_{promo_sel_choisie}")
                         with c3: st.download_button(f"⬇️ PDF - {promo_sel_choisie}", generer_pdf_edt(attr_promo, promo_sel_choisie, CRENEAUX), f"EDT_{promo_sel_choisie}.pdf", "application/pdf", key=f"dl_pdf_{promo_sel_choisie}")
                 else:
-                    st.info(f"Aucune attribution trouvée pour la promotion {promo_sel_choisie}. Veuillez lancer l'attribution dans l'onglet 'Attributions'.")
+                    st.info(f"Aucune attribution trouvée pour la promotion {promo_sel_choisie}.")
         else: st.warning("⚠️ Veuillez d'abord générer les attributions.")
 
     with tabs[5]:
