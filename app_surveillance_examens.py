@@ -9,7 +9,6 @@ import io
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 import os
 import re
@@ -35,7 +34,6 @@ SALLES = [f"S{i:02d}" for i in range(1, 18)]
 AMPHIS = [f"A{i:02d}" for i in range(1, 13)]
 CRENEAUX = ["08h30 - 10h30", "11h00 - 13h00", "13h30 - 15h30"]
 JOURS_FR = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi", "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
-JOURS_SEMAINE_DISPO = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"]
 FICHIER_SOURCE = "DATA-ENS-2026-2027_surveillances.xlsx"
 
 def init_session_state():
@@ -228,16 +226,12 @@ def generer_planning_promo(examens_df, promotion, date_debut, jours_feries, cren
     for i in promo_df.index:
         matiere_nom = promo_df.at[i, 'Enseignements']
         
-        jour_pref = jours_matiere.get(promotion, {}).get(matiere_nom) if jours_matiere else None
-        if jour_pref:
-            d_test = date_debut
-            for _ in range(30):
-                if est_jour_travaille(d_test, jours_feries):
-                    j_fr = JOURS_FR.get(d_test.strftime("%A"), d_test.strftime("%A"))
-                    if j_fr == jour_pref:
-                        break
-                d_test += timedelta(days=1)
-            date_examen = d_test
+        date_pref = jours_matiere.get(promotion, {}).get(matiere_nom) if jours_matiere else None
+        if date_pref:
+            if isinstance(date_pref, datetime):
+                date_examen = date_pref.date()
+            else:
+                date_examen = date_pref
         else:
             while not est_jour_travaille(date_courante, jours_feries):
                 date_courante += timedelta(days=1)
@@ -785,11 +779,34 @@ def main():
         st.markdown("---")
         st.markdown("### 📅 Date de Début")
         st.session_state.date_debut_val = st.date_input("Date début", st.session_state.date_debut_val, key="w_dd")
-        st.markdown("### 🎉 Jours Fériés")
-        jf = st.text_area("JJ/MM/AAAA, séparés par virgules", placeholder="11/11/2026, 25/12/2026...", key="w_jf")
-        if jf:
-            try: st.session_state.jours_feries = [datetime.strptime(d.strip(), "%d/%m/%Y").date() for d in jf.split(",") if d.strip()]
-            except: st.warning("Format invalide")
+        
+        st.markdown("### 🎉 Jours Fériés (Calendrier)")
+        if 'jours_feries_list' not in st.session_state:
+            st.session_state.jours_feries_list = []
+            
+        col_pick, col_add = st.columns([2, 1])
+        with col_pick:
+            date_ferie_choisie = st.date_input("Choisir un férié", key="picker_ferie_unique")
+        with col_add:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Ajouter", key="btn_add_ferie"):
+                if date_ferie_choisie not in st.session_state.jours_feries_list:
+                    st.session_state.jours_feries_list.append(date_ferie_choisie)
+                    st.session_state.jours_feries = sorted(st.session_state.jours_feries_list)
+                    st.rerun()
+                    
+        if st.session_state.jours_feries_list:
+            st.write("Jours fériés enregistrés :")
+            for jf_item in list(st.session_state.jours_feries_list):
+                c_jf1, c_jf2 = st.columns([3, 1])
+                with c_jf1:
+                    st.text(jf_item.strftime("%d/%m/%Y"))
+                with c_jf2:
+                    if st.button("❌", key=f"del_ferie_{jf_item}"):
+                        st.session_state.jours_feries_list.remove(jf_item)
+                        st.session_state.jours_feries = sorted(st.session_state.jours_feries_list)
+                        st.rerun()
+
         st.markdown("---")
         st.info("💡 Vendredi et Samedi exclus. Dimanche est travaillable.")
 
@@ -804,7 +821,8 @@ def main():
                 <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>🎯 Vacataire configuré en <b>deuxième position</b> pour chaque lieu</li>
-                <li>🕐 <b>Choix du jour et de l'horaire par matière</b> (par promotion isolée)</li>
+                <li>🕐 <b>Choix de la date exacte et de l'horaire par matière</b> (par promotion isolée)</li>
+                <li>🎉 <b>Sélection des jours fériés depuis le calendrier interactif</b></li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -842,7 +860,7 @@ def main():
                 lieux_sel = salles_sel + amphis_sel
                 st.session_state.lieux_par_promo[promo_selected] = lieux_sel
                 
-                st.markdown("#### 🕒 Personnalisation des Jours et Horaires par Matière")
+                st.markdown("#### 🕒 Personnalisation de la Date exacte et de l'Horaire par Matière")
                 df_promo_matieres = st.session_state.examens_df[st.session_state.examens_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()]
                 
                 if not df_promo_matieres.empty:
@@ -857,16 +875,19 @@ def main():
                         with col_m1:
                             st.text(f"📖 {m_nom} (Resp: {row_mat['Enseignants']})")
                         with col_m2:
-                            j_choisi = st.selectbox(f"Jour - {m_nom}", ["Par défaut"] + JOURS_SEMAINE_DISPO, key=f"j_{promo_selected}_{m_nom}")
-                            if j_choisi != "Par défaut":
-                                st.session_state.jours_par_matiere[promo_selected][m_nom] = j_choisi
-                            elif m_nom in st.session_state.jours_par_matiere[promo_selected]:
-                                del st.session_state.jours_par_matiere[promo_selected][m_nom]
+                            date_actuelle = st.session_state.jours_par_matiere.get(promo_selected, {}).get(m_nom, None)
+                            activer_date_fixe = st.checkbox(f"Date fixe - {m_nom}", value=(date_actuelle is not None), key=f"chk_date_{promo_selected}_{m_nom}")
+                            if activer_date_fixe:
+                                d_choisie = st.date_input(f"Date - {m_nom}", value=date_actuelle if isinstance(date_actuelle, date) else st.session_state.date_debut_val, key=f"d_choisie_{promo_selected}_{m_nom}")
+                                st.session_state.jours_par_matiere.setdefault(promo_selected, {})[m_nom] = d_choisie
+                            else:
+                                if promo_selected in st.session_state.jours_par_matiere and m_nom in st.session_state.jours_par_matiere[promo_selected]:
+                                    del st.session_state.jours_par_matiere[promo_selected][m_nom]
                         with col_m3:
                             h_choisi = st.selectbox(f"Horaire - {m_nom}", ["Par défaut"] + creneaux_sel, key=f"h_{promo_selected}_{m_nom}")
                             if h_choisi != "Par défaut":
-                                st.session_state.horaires_par_matiere[promo_selected][m_nom] = h_choisi
-                            elif m_nom in st.session_state.horaires_par_matiere[promo_selected]:
+                                st.session_state.horaires_par_matiere.setdefault(promo_selected, {})[m_nom] = h_choisi
+                            elif m_nom in st.session_state.horaires_par_matiere.get(promo_selected, {}):
                                 del st.session_state.horaires_par_matiere[promo_selected][m_nom]
                 
                 if st.button(f"🚀 Générer le Planning uniquement pour {promo_selected}", type="primary", key=f"btn_gen_{promo_selected}"):
