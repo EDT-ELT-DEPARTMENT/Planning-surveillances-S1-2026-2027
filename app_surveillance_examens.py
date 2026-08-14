@@ -75,6 +75,18 @@ def extraire_nom_cours(enseignement_str):
     nom = re.sub(r'^[Cc][Oo][Uu][Rr][Ss][ \-_:]+', '', val).strip()
     return nom if nom else val
 
+def corriger_fautes_enseignants(nom):
+    if not isinstance(nom, str):
+        return nom
+    nom_clean = nom.strip()
+    if nom_clean == "Belhadj":
+        return "Belabed"
+    elif nom_clean == "Zeghdoudi":
+        return "ZEGHOUDI"
+    elif nom_clean == "Babali":
+        return "Bahlil"
+    return nom_clean
+
 def charger_fichier_source_auto():
     try:
         paths_to_try = [FICHIER_SOURCE, os.path.join(os.getcwd(), FICHIER_SOURCE),
@@ -91,7 +103,6 @@ def charger_fichier_source_auto():
         xls = pd.ExcelFile(file_path)
         sheet_names = xls.sheet_names
         
-        # Priorité aux feuilles 'matières' ou 'EDTCE' si présentes
         ens_sheet = None
         for preferred in ['matières', 'EDTCE']:
             if preferred in sheet_names:
@@ -142,7 +153,10 @@ def charger_fichier_source_auto():
             if col not in df_ens.columns:
                 df_ens[col] = ''
         df_ens = df_ens[df_ens['nom'].notna() & (df_ens['nom'].astype(str).str.strip() != '')].copy()
+        
+        df_ens['nom'] = df_ens['nom'].apply(lambda x: corriger_fautes_enseignants(str(x)))
         df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)
+        
         examens_data = []
         for _, row in df_ens.iterrows():
             raw_ens = str(row.get('Enseignements', ''))
@@ -1011,7 +1025,7 @@ def main():
                     
                     planning_display = st.session_state.planning_df[st.session_state.planning_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()].copy()
                     if not planning_display.empty:
-                        colonnes_edition = ["Enseignements", "date", "Horaire", "Lieu", "Enseignants"]
+                        colonnes_edition = ["Enseignements", "date", "Horaire", "Lieu", "Enseignants", "Promotion"]
                         for col_c in colonnes_edition:
                             if col_c not in planning_display.columns:
                                 planning_display[col_c] = ""
@@ -1055,12 +1069,14 @@ def main():
                                     new_horaire = row_ed['Horaire']
                                     new_lieu = row_ed['Lieu']
                                     new_ens = row_ed['Enseignants']
+                                    new_promo = row_ed['Promotion']
                                     
                                     mask = (st.session_state.planning_df['Promotion'].astype(str).str.strip() == str(promo_selected).strip()) & (st.session_state.planning_df['Enseignements'] == m_nom)
                                     st.session_state.planning_df.loc[mask, 'date'] = new_date
                                     st.session_state.planning_df.loc[mask, 'Horaire'] = new_horaire
                                     st.session_state.planning_df.loc[mask, 'Lieu'] = new_lieu
                                     st.session_state.planning_df.loc[mask, 'Enseignants'] = new_ens
+                                    st.session_state.planning_df.loc[mask, 'Promotion'] = new_promo
                                     if isinstance(new_date, (date, datetime)):
                                         st.session_state.planning_df.loc[mask, 'Jours'] = JOURS_FR.get(new_date.strftime("%A"), new_date.strftime("%A"))
                                         
