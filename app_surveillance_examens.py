@@ -1416,16 +1416,18 @@ def main():
             if all_ens:
                 ens_selectionne = st.selectbox("Sélectionner un enseignant dans la liste déroulante :", sorted(all_ens), key="select_ens_surv_display")
                 if ens_selectionne:
-                    # Récupérer les détails assignés
+                    nb_surv_actuel = 0
+                    if 'surveillance_attribuee' in df_ens.columns:
+                        row_e = df_ens[df_ens['nom'] == ens_selectionne]
+                        if not row_e.empty:
+                            nb_surv_actuel = int(row_e.iloc[0]['surveillance_attribuee'])
+                    
                     details_assigns = []
                     if st.session_state.surveillance_df is not None:
                         for attr in st.session_state.surveillance_df:
                             survs = [s['nom'] for s in attr.get('details_surveillants', [])]
                             if ens_selectionne in survs or attr.get('enseignant') == ens_selectionne:
                                 details_assigns.append(attr)
-                    
-                    # ✅ CORRECTION: Compter correctement = nombre exact de lignes dans le tableau
-                    nb_surv_actuel = len(details_assigns)
                                 
                     col_m1, col_m2 = st.columns(2)
                     with col_m1:
@@ -1435,7 +1437,7 @@ def main():
                         st.metric(label="Qualité / Statut", value=qualite_ens_val)
                         
                     if details_assigns:
-                        st.markdown(f"**Détails des examens / surveillances associés à {ens_selectionne} :** ({nb_surv_actuel} enregistrement(s))")
+                        st.markdown(f"**Détails des examens / surveillances associés à {ens_selectionne} :**")
                         df_details_ens = pd.DataFrame([{
                             'Date': (a['date'].strftime('%d/%m/%Y') if hasattr(a.get('date'), 'strftime') else str(a.get('date'))),
                             'Horaire': a.get('creneau'),
@@ -1803,7 +1805,15 @@ def main():
     with tabs[5]:
         st.markdown('<div class="sub-header">📂 Répertoire des EDTs & Téléchargements (Individuel & Groupé)</div>', unsafe_allow_html=True)
         
-        nb_generes = len(st.session_state.historique_edt) if 'historique_edt' in st.session_state else 0
+        nb_generes = 0
+        if st.session_state.surveillance_df is not None and st.session_state.promotions_list:
+            # ✅ CORRECTION: Compter les promotions qui ont au moins une attribution
+            # (Exactement comme le répertoire individuel les affiche)
+            for promo in st.session_state.promotions_list:
+                attr_promo = [a for a in st.session_state.surveillance_df if str(a.get('promotion', '')).strip() == str(promo).strip()]
+                if attr_promo:  # Si cette promotion a des attributions
+                    nb_generes += 1
+        
         total_promos_attendu = len(st.session_state.promotions_list) if st.session_state.promotions_list else 23
         
         st.markdown(f"""
