@@ -1388,13 +1388,13 @@ def main():
         st.session_state.nb_surv_autre = st.number_input("Autre", 0, 20, st.session_state.nb_surv_autre, key="w_qa")
         
         # 🔢 Afficheur: Enseignants ayant atteint leur quota
-        if st.session_state.data_loaded and st.session_state.enseignants_df is not None:
+        if st.session_state.data_loaded and st.session_state.surveillance_df is not None:
             quotas_dict = {
                 'Permanent': st.session_state.nb_surv_permanent,
                 'Vacataire': st.session_state.nb_surv_vacataire,
                 'Autre': st.session_state.nb_surv_autre
             }
-            comptage_quota = compter_enseignants_quota_atteint(st.session_state.enseignants_df, quotas_dict)
+            comptage_quota = compter_enseignants_quota_atteint(st.session_state.surveillance_df, quotas_dict)
             
             st.markdown("#### 🎯 Enseignants ayant atteint leur quota")
             for qualite, data in comptage_quota.items():
