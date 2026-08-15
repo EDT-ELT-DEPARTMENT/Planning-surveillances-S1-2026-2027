@@ -496,6 +496,15 @@ def attribuer_surveillants(planning_df, enseignants_df):
         })
         
     attributions = sorted(attributions, key=lambda x: (x.get('date', datetime.min if 'datetime' in globals() else str(x.get('date'))), creneaux_actifs.index(x.get('creneau')) if x.get('creneau') in creneaux_actifs else 0, x.get('promotion', '')))
+    # 🔄 Synchronisation stricte : Recalculer le compteur à partir des attributions réelles
+    surveillants['surveillance_attribuee'] = 0
+    for attr in attributions:
+        for s_nom in attr['surveillants']:
+            mask = surveillants['nom'] == s_nom
+            if mask.any():
+                current_val = surveillants.loc[mask, 'surveillance_attribuee'].values[0]
+                surveillants.loc[mask, 'surveillance_attribuee'] = current_val + 1
+    
     st.session_state.disponibilites_enseignants = disponibilites_enseignants
     return attributions, surveillants
 
