@@ -886,7 +886,7 @@ def generer_pdf(attributions):
 
 def envoyer_email_edt(destinataire, sujet, corps, fichier_buffer, nom_fichier_piece):
     """Envoie un e-mail avec l'EDT en pièce jointe via SMTP."""
-    smtp_server = st.session_state.get('smtp_server', 'smtp.gmail.com')
+    smtp_server = st.session_state.get('gkzs pdza yodb icvd', 'chef.department.elt.fge@gmail.com')
     smtp_port = st.session_state.get('smtp_port', 587)
     smtp_user = st.session_state.get('smtp_user', '')
     smtp_password = st.session_state.get('smtp_password', '')
