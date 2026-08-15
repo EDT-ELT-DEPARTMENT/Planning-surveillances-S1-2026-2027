@@ -593,7 +593,7 @@ def construire_grille_edt(attributions, creneaux_liste):
         creneau = attr.get('creneau', CRENEAUX_DEFAUT[0])
         if creneau not in grille[cle_jour]: grille[cle_jour][creneau] = []
         survs = attr.get('details_surveillants', [])
-        surv_text = "\n".join([f"• {s['nom']} ({s['qualite']})" for s in survs])
+        surv_text = "\n".join([f"• {s['nom']} ({'Vac' if s['qualite'] == 'Vacataire' else 'Perm' if s['qualite'] == 'Permanent' else s['qualite']})" for s in survs])
         grp_str = f" [Grp: {attr.get('groupe', 'Global')}]" if attr.get('groupe') and attr.get('groupe') != 'Global' else ""
         grille[cle_jour][creneau].append({
             'matiere': attr.get('matiere', ''), 
@@ -635,12 +635,16 @@ def generer_excel_edt(df_grille, promotion):
     thin_border = Border(left=Side(style='thin', color='90CAF9'), right=Side(style='thin', color='90CAF9'),
                          top=Side(style='thin', color='90CAF9'), bottom=Side(style='thin', color='90CAF9'))
     headers = ['Creneau'] + [c for c in df_grille.columns if c != 'Creneau']
+
+    # En-têtes
     for c_idx, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=c_idx, value=header)
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         cell.border = thin_border
+
+    # Données
     for r_idx, row in df_grille.iterrows():
         for c_idx, col_name in enumerate(headers, 1):
             val = row.get(col_name, '')
@@ -653,6 +657,31 @@ def generer_excel_edt(df_grille, promotion):
             else:
                 cell.fill = cell_fill
                 cell.font = cell_font
+
+    # Ajustement automatique de la largeur des colonnes
+    for col in ws.columns:
+        max_length = 0
+        column = col[0].column_letter
+        for cell in col:
+            try:
+                if cell.value:
+                    lines_in_cell = str(cell.value).split('\n')
+                    max_line_len = max(len(line) for line in lines_in_cell)
+                    max_length = max(max_length, max_line_len)
+            except:
+                pass
+        adjusted_width = min(max_length + 3, 60)
+        ws.column_dimensions[column].width = max(adjusted_width, 12)
+
+    # Ajustement automatique de la hauteur des lignes
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+        max_lines = 1
+        for cell in row:
+            if cell.value:
+                num_lines = str(cell.value).count('\n') + 1
+                max_lines = max(max_lines, num_lines)
+        ws.row_dimensions[row[0].row].height = max(max_lines * 14, 30)
+
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
@@ -832,7 +861,7 @@ def generer_tableau_html(attributions, creneaux_utilises):
             if creneau in planning_par_jour.get(jour, {}):
                 for examen in planning_par_jour[jour][creneau]:
                     survs = examen.get('details_surveillants', [])
-                    surv_html = "<br>".join([f"<span>{s['nom']} ({s['qualite']}{'*' if s.get('priorite') == 'Charge de matiere' else ''})</span>" for s in survs])
+                    surv_html = "<br>".join([f"<span>{s['nom']} ({'Vac' if s['qualite'] == 'Vacataire' else 'Perm' if s['qualite'] == 'Permanent' else s['qualite']}{'*' if s.get('priorite') == 'Charge de matiere' else ''})</span>" for s in survs])
                     grp_info = f" | Grp: {examen.get('groupe', 'Global')}" if examen.get('groupe') and examen.get('groupe') != 'Global' else ""
                     html += f"<div class='examen-cell'><strong>{examen.get('matiere', '')}</strong><br><small>Promo: {examen.get('promotion', '')}{grp_info} | Lieu: {examen.get('lieu', '')}</small><br><small>Chargé: {examen.get('enseignant', '')}</small><br><small>{surv_html}</small></div>"
             html += "</td>"
@@ -853,7 +882,7 @@ def generer_excel_colore(attributions):
         else:
             date_str = str(date_val)
             jour = ''
-        surv_str = ", ".join([f"{s['nom']} ({s['qualite']})" for s in attr.get('details_surveillants', [])])
+        surv_str = ", ".join([f"{s['nom']} ({'Vac' if s['qualite'] == 'Vacataire' else 'Perm' if s['qualite'] == 'Permanent' else s['qualite']})" for s in attr.get('details_surveillants', [])])
         data.append({
             'Enseignements': attr.get('matiere', ''), 
             'Code': f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}", 
@@ -913,7 +942,7 @@ def generer_pdf(attributions):
         else:
             date_str = str(date_val)
             jour = ''
-        surv_str = ", ".join([f"{s['nom']} ({s['qualite']})" for s in attr.get('details_surveillants', [])])
+        surv_str = ", ".join([f"{s['nom']} ({'Vac' if s['qualite'] == 'Vacataire' else 'Perm' if s['qualite'] == 'Permanent' else s['qualite']})" for s in attr.get('details_surveillants', [])])
         table_data.append([
             attr.get('matiere', ''), 
             f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}", 
@@ -1135,14 +1164,29 @@ def generer_excel_toutes_promotions():
                     cell.fill = cell_fill
                     cell.font = cell_font
 
+        # Ajustement automatique de la largeur des colonnes
         for col in ws.columns:
             max_length = 0
             column = col[0].column_letter
             for cell in col:
                 try:
-                    if cell.value: max_length = max(max_length, len(str(cell.value)))
-                except: pass
-            ws.column_dimensions[column].width = min(max(max_length + 2, 15), 50)
+                    if cell.value:
+                        lines_in_cell = str(cell.value).split('\n')
+                        max_line_len = max(len(line) for line in lines_in_cell)
+                        max_length = max(max_length, max_line_len)
+                except:
+                    pass
+            adjusted_width = min(max_length + 3, 60)
+            ws.column_dimensions[column].width = max(adjusted_width, 12)
+
+        # Ajustement automatique de la hauteur des lignes
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+            max_lines = 1
+            for cell in row:
+                if cell.value:
+                    num_lines = str(cell.value).count('\n') + 1
+                    max_lines = max(max_lines, num_lines)
+            ws.row_dimensions[row[0].row].height = max(max_lines * 14, 30)
 
     if len(wb.sheetnames) == 0:
         ws = wb.create_sheet(title="Vide")
