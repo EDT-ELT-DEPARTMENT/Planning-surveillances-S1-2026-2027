@@ -764,7 +764,7 @@ def generer_pdf_edt(attributions, promotion, creneaux_liste):
     header_style = ParagraphStyle('TableHeader', parent=styles['Normal'], fontSize=8, leading=10, textColor=colors.whitesmoke, alignment=1, fontName='Helvetica-Bold')
     jour_header_style = ParagraphStyle('JourHeader', parent=header_style, fontSize=8, leading=10)
     
-    table_data = [[Paragraph('Jour / Date', creneau_header_style)] + [Paragraph(c, header_style) for c in creneaux_cols]]
+    table_data = [[Paragraph('Jour / Date', jour_header_style)] + [Paragraph(c, header_style) for c in creneaux_cols]]
     
     cell_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontSize=7, leading=9, alignment=1, textColor=colors.HexColor('#333333'))
     jour_cell_style = ParagraphStyle('JourCell', parent=cell_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#1565C0'))
@@ -1228,13 +1228,13 @@ def generer_pdf_toutes_promotions():
         creneaux_cols = [c for c in df_grille.columns if c != 'Jour']
         header_style = ParagraphStyle('TableHeader', parent=styles['Normal'], fontSize=8, leading=10, textColor=colors.whitesmoke, alignment=1, fontName='Helvetica-Bold')
         creneau_header_style = ParagraphStyle('CreneauHeader', parent=header_style, fontSize=8, leading=10)
-        table_data = [[Paragraph('Jour / Date', creneau_header_style)] + [Paragraph(c, header_style) for c in creneaux_cols]]
+        table_data = [[Paragraph('Creneau / Horaire', creneau_header_style)] + [Paragraph(j.replace('\n', '<br/>'), header_style) for j in jours_cols]]
         cell_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontSize=7, leading=9, alignment=1, textColor=colors.HexColor('#333333'))
         creneau_cell_style = ParagraphStyle('CreneauCell', parent=cell_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#1565C0'))
 
         for _, row in df_grille.iterrows():
             row_data = [Paragraph(str(row['Creneau']), creneau_cell_style)]
-            for creneau in creneaux_cols:
+            for jour in jours_cols:
                 val = row.get(creneau, '')
                 if val:
                     parts = val.split('\n---\n')
@@ -1258,7 +1258,7 @@ def generer_pdf_toutes_promotions():
             table_data.append(row_data)
 
         available_width = 27.7 * cm
-        col_widths = [3.5 * cm] + [(available_width - 3.5 * cm) / len(creneaux_cols)] * len(creneaux_cols)
+        col_widths = [3 * cm] + [(available_width - 3 * cm) / len(jours_cols)] * len(jours_cols)
         table = Table(table_data, repeatRows=1, colWidths=col_widths)
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565C0')),
