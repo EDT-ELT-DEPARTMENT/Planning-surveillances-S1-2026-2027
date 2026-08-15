@@ -401,9 +401,6 @@ def attribuer_surveillants(planning_df, enseignants_df):
                             surveillants.loc[surveillants['nom'] == nom_ens, 'surveillance_attribuee'] += 1
                             charges_affectees_creneau.add(cle_multi_lieux)
 
-        # Règle d'attribution des vacataires et permanents[cite: 7] :
-        # - Pour 3 surveillants (Amphis) : 1 vacataire et 2 permanents[cite: 7].
-        # - Pour 2 surveillants (Salles) : 2 permanents[cite: 7].
         if nb_surv_requis == 3:
             target_vacataires = 1
             target_permanents = 2
@@ -988,7 +985,6 @@ def main():
             df_ens = st.session_state.enseignants_df
             all_ens = st.session_state.all_enseignants_list
             
-            # --- Afficheur numérique du nombre de surveillances par enseignant (via une liste déroulante) ---
             st.markdown("### 🔢 Afficheur Numérique du Nombre de Surveillances par Enseignant")
             if all_ens:
                 ens_selectionne = st.selectbox("Sélectionner un enseignant dans la liste déroulante :", sorted(all_ens), key="select_ens_surv_display")
@@ -1401,3 +1397,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+```[cite: 9]
