@@ -1610,105 +1610,63 @@ def main():
         if not sender_email or not sender_password:
             st.warning("⚠️ Veuillez configurer les paramètres SMTP dans la barre latérale (📧 Configuration E-mail).")
 
-        # --- Choix de la source de données ---
-        source_option = st.radio(
-            "Source des données pour l'envoi",
-            ["📁 Fichier importé (Excel/CSV)", "📊 EDT générés par la plateforme"],
-            horizontal=True,
-            key="email_source_radio"
-        )
-
-        df = None
-
-        # ============================================================
-        # SOURCE 1 : FICHIER IMPORTÉ (avec persistance en session_state)
-        # ============================================================
-        if source_option == "📁 Fichier importé (Excel/CSV)":
-            if 'email_imported_df' not in st.session_state:
-                st.session_state.email_imported_df = None
-
-            uploaded_file = st.file_uploader(
-                "Importer le fichier source des surveillances (Excel/CSV)",
-                type=["xlsx", "csv"],
-                key="email_file_uploader"
-            )
-
-            if uploaded_file is not None:
-                if uploaded_file.name.endswith('.csv'):
-                    df = pd.read_csv(uploaded_file)
-                else:
-                    df = pd.read_excel(uploaded_file)
-                st.session_state.email_imported_df = df
-                st.success("✅ Fichier chargé et sauvegardé en mémoire pour les prochaines sessions !")
-            elif st.session_state.email_imported_df is not None:
-                df = st.session_state.email_imported_df
-                st.info("📁 Fichier précédemment importé chargé automatiquement depuis la mémoire. Vous pouvez importer un nouveau fichier pour le remplacer.")
-
-        # ============================================================
-        # SOURCE 2 : EDT GÉNÉRÉS PAR LA PLATEFORME
-        # ============================================================
+        # --- Vérification des attributions disponibles ---
+        if st.session_state.surveillance_df is None or len(st.session_state.surveillance_df) == 0:
+            st.warning("⚠️ Aucune attribution de surveillance disponible. Veuillez d'abord générer les attributions dans l'onglet 🎯 Attributions.")
         else:
-            if st.session_state.surveillance_df is not None and len(st.session_state.surveillance_df) > 0:
-                st.markdown("**Les EDT générés par la plateforme sont disponibles.**")
+            st.success(f"✅ {len(st.session_state.surveillance_df)} attributions de surveillance disponibles.")
 
-                # Conversion des attributions en DataFrame au format attendu
-                rows = []
-                for attr in st.session_state.surveillance_df:
-                    date_val = attr.get('date')
-                    jour = ''
-                    if hasattr(date_val, 'strftime'):
-                        jour = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
-                    for s in attr.get('details_surveillants', []):
-                        rows.append({
-                            'Enseignements': attr.get('matiere', ''),
-                            'Code': f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}",
-                            'Enseignants': s['nom'],
-                            'Horaire': attr.get('creneau', ''),
-                            'Jours': jour,
-                            'Lieu': attr.get('lieu', ''),
-                            'Promotion': attr.get('promotion', ''),
-                            'Email': ''
-                        })
-                df_edt = pd.DataFrame(rows)
+            # Conversion des attributions en DataFrame exploitable
+            rows = []
+            for attr in st.session_state.surveillance_df:
+                date_val = attr.get('date')
+                date_str = ''
+                jour = ''
+                if hasattr(date_val, 'strftime'):
+                    date_str = date_val.strftime('%d/%m/%Y')
+                    jour = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
+                for s in attr.get('details_surveillants', []):
+                    rows.append({
+                        'Enseignements': attr.get('matiere', ''),
+                        'Code': f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}",
+                        'Enseignants': s['nom'],
+                        'Horaire': attr.get('creneau', ''),
+                        'Jours': jour,
+                        'Lieu': attr.get('lieu', ''),
+                        'Promotion': attr.get('promotion', ''),
+                        'Groupe': attr.get('groupe', 'Global'),
+                        'Date': date_str,
+                        'Email': ''
+                    })
+            df_attributions = pd.DataFrame(rows)
 
-                st.markdown("**Aperçu des EDT générés :**")
-                st.dataframe(df_edt[['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion']])
+            st.markdown("**📋 Aperçu des surveillances extraites des attributions :**")
+            st.dataframe(df_attributions[['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']], use_container_width=True, hide_index=True)
 
-                # Mapping emails optionnel
-                st.markdown("**Importez un fichier de mapping Enseignant → Email (Excel/CSV) avec les colonnes 'Enseignants' et 'Email' :**")
-                uploaded_mapping = st.file_uploader("Mapping Emails", type=["xlsx", "csv"], key="email_mapping")
+            st.markdown("---")
+            st.markdown("### 📧 Import du mapping Enseignant → Email")
+            st.info("Importez un fichier Excel/CSV contenant les colonnes **'Enseignants'** et **'Email'** pour associer les adresses e-mails aux surveillants.")
 
-                if uploaded_mapping is not None:
-                    if uploaded_mapping.name.endswith('.csv'):
-                        df_map = pd.read_csv(uploaded_mapping)
-                    else:
-                        df_map = pd.read_excel(uploaded_mapping)
-                    if 'Enseignants' in df_map.columns and 'Email' in df_map.columns:
-                        df_edt = df_edt.merge(df_map[['Enseignants', 'Email']], on='Enseignants', how='left')
-                        st.success("✅ Mapping email fusionné avec succès !")
-                    else:
-                        st.error("❌ Le fichier de mapping doit contenir les colonnes 'Enseignants' et 'Email'.")
+            uploaded_mapping = st.file_uploader("Fichier de mapping Enseignant → Email (Excel/CSV)", type=["xlsx", "csv"], key="email_mapping")
 
-                col_save1, col_save2 = st.columns([1, 3])
-                with col_save1:
-                    if st.button("💾 Sauvegarder les EDT générés dans le module d'envoi", key="save_edt_to_email"):
-                        st.session_state.email_imported_df = df_edt
-                        st.success("✅ EDT générés sauvegardés dans le module d'envoi !")
-                        st.rerun()
-                with col_save2:
-                    st.info("💡 Cliquez sur 'Sauvegarder' pour conserver les EDT générés en mémoire et les envoyer par email.")
-
-                df = df_edt
+            df = None
+            if uploaded_mapping is not None:
+                if uploaded_mapping.name.endswith('.csv'):
+                    df_map = pd.read_csv(uploaded_mapping)
+                else:
+                    df_map = pd.read_excel(uploaded_mapping)
+                if 'Enseignants' not in df_map.columns or 'Email' not in df_map.columns:
+                    st.error("❌ Le fichier de mapping doit contenir obligatoirement les colonnes 'Enseignants' et 'Email'.")
+                else:
+                    df = df_attributions.merge(df_map[['Enseignants', 'Email']], on='Enseignants', how='left')
+                    st.success("✅ Mapping email fusionné avec les attributions !")
+                    nb_avec_email = df['Email'].notna().sum()
+                    st.info(f"📊 {nb_avec_email} / {len(df)} lignes ont une adresse e-mail associée.")
             else:
-                st.warning("⚠️ Aucun EDT généré par la plateforme. Veuillez d'abord générer les attributions dans l'onglet '🎯 Attributions'.")
+                st.info("💡 Aucun fichier de mapping importé. Vous pouvez quand même visualiser les attributions, mais l'envoi d'e-mails nécessite les adresses.")
+                df = df_attributions.copy()
 
-        # ============================================================
-        # LOGIQUE D'ENVOI (commune aux deux sources)
-        # ============================================================
-        if df is not None:
-            colonnes_requises = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Email']
-            if all(col in df.columns for col in colonnes_requises):
-
+            if df is not None:
                 enseignants_list = df['Enseignants'].dropna().unique()
 
                 tab_indiv, tab_groupe = st.tabs(["👤 Envoi Individuel", "👥 Envoi par Groupe (Masse)"])
@@ -1716,20 +1674,20 @@ def main():
                 # --- 1. ENVOI INDIVIDUEL ---
                 with tab_indiv:
                     st.subheader("Gestion et Envoi Individuel")
-                    selected_prof = st.selectbox("Sélectionner un enseignant", enseignants_list, key="email_select_prof")
+                    selected_prof = st.selectbox("Sélectionner un surveillant", enseignants_list, key="email_select_prof")
 
                     df_prof = df[df['Enseignants'] == selected_prof]
-                    prof_email = df_prof['Email'].iloc[0] if not df_prof.empty else ""
+                    prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and pd.notna(df_prof['Email'].iloc[0]) else ""
 
                     st.text(f"E-mail associé : {prof_email if prof_email else 'Aucun e-mail trouvé'}")
                     st.markdown("**Planning de surveillance affecté :**")
-                    st.dataframe(df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion']])
+                    st.dataframe(df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']], use_container_width=True, hide_index=True)
 
                     custom_msg = st.text_area("Message personnalisé (optionnel)", "Bonjour,\n\nVeuillez trouver ci-joint votre planning de surveillance pour les examens.\n\nCordialement,", key="email_custom_msg")
 
                     if st.button("Envoyer l'EDT à cet enseignant", key="email_btn_indiv"):
                         if not prof_email:
-                            st.error("Impossible d'envoyer : l'adresse e-mail est manquante pour cet enseignant.")
+                            st.error("Impossible d'envoyer : l'adresse e-mail est manquante pour cet enseignant. Importez un fichier de mapping avec la colonne 'Email'.")
                         elif not sender_email or not sender_password:
                             st.error("Veuillez configurer les paramètres SMTP dans la barre latérale.")
                         else:
@@ -1739,7 +1697,7 @@ def main():
                                 msg['To'] = prof_email
                                 msg['Subject'] = "Plateforme de gestion des EDTs-S2-2026 - Votre planning de surveillance"
 
-                                corps_tableau = df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion']].to_html(index=False)
+                                corps_tableau = df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']].to_html(index=False)
                                 html_content = f"<p>{custom_msg.replace(chr(10), '<br>')}</p>{corps_tableau}"
                                 msg.attach(MIMEText(html_content, 'html'))
 
@@ -1755,8 +1713,8 @@ def main():
 
                 # --- 2. ENVOI PAR GROUPE ---
                 with tab_groupe:
-                    st.subheader("Envoi Groupé à tous les enseignants affectés")
-                    st.info("Cette action va parcourir l'ensemble du fichier source, extraire les plannings et les adresses e-mails de chaque enseignant, puis envoyer les notifications correspondantes.")
+                    st.subheader("Envoi Groupé à tous les surveillants")
+                    st.info("Cette action va envoyer un e-mail à chaque surveillant listé dans les attributions, avec son planning personnel.")
 
                     if st.button("Lancer l'envoi groupé", key="email_btn_group"):
                         if not sender_email or not sender_password:
@@ -1769,31 +1727,33 @@ def main():
 
                                 barre_progression = st.progress(0)
                                 total = len(enseignants_list)
+                                envoyes = 0
+                                echecs = 0
 
                                 for i, prof in enumerate(enseignants_list):
                                     df_prof = df[df['Enseignants'] == prof]
-                                    prof_email = df_prof['Email'].iloc[0] if not df_prof.empty else ""
+                                    prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and pd.notna(df_prof['Email'].iloc[0]) else ""
 
-                                    if prof_email and pd.notna(prof_email):
+                                    if prof_email:
                                         msg = MIMEMultipart()
                                         msg['From'] = sender_email
                                         msg['To'] = prof_email
                                         msg['Subject'] = "Plateforme de gestion des EDTs-S2-2026 - Votre planning de surveillance"
 
-                                        corps_tableau = df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion']].to_html(index=False)
+                                        corps_tableau = df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']].to_html(index=False)
                                         html_content = f"<p>Bonjour Pr./Dr. {prof},<br><br>Veuillez trouver ci-dessous votre planning de surveillance extrait de la Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA :</p>{corps_tableau}"
                                         msg.attach(MIMEText(html_content, 'html'))
 
                                         server.sendmail(sender_email, prof_email, msg.as_string())
+                                        envoyes += 1
+                                    else:
+                                        echecs += 1
 
                                     barre_progression.progress((i + 1) / total)
 
                                 server.quit()
-                                st.success("L'envoi groupé de tous les emplois du temps de surveillance a été effectué avec succès !")
+                                st.success(f"✅ Envoi groupé terminé : {envoyes} e-mail(s) envoyé(s), {echecs} sans adresse e-mail.")
                             except Exception as e:
                                 st.error(f"Erreur lors de l'envoi groupé : {e}")
-
-            else:
-                st.error(f"❌ Le fichier importé ne respecte pas la disposition requise. Colonnes attendues : {colonnes_requises}")
 if __name__ == "__main__":
     main()
