@@ -317,32 +317,87 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
             
     return df_working
 
-def attribuer_surveillants(planning_df, enseignants_df):
+def attribuer_surveillances(planning_df, enseignants_df):
     if planning_df is None or enseignants_df is None:
         return None, enseignants_df
+        
     surveillants = enseignants_df.copy()
     if 'surveillance_attribuee' not in surveillants.columns:
         surveillants['surveillance_attribuee'] = 0
+        
     exclus = st.session_state.get('exclus_manuels', [])
-    
     attributions = []
     
     if 'disponibilites_enseignants' not in st.session_state or not isinstance(st.session_state.disponibilites_enseignants, dict):
         st.session_state.disponibilites_enseignants = {}
     disponibilites_enseignants = st.session_state.disponibilites_enseignants
+    
     for ens_nom in surveillants['nom'].unique():
         if ens_nom not in disponibilites_enseignants:
             disponibilites_enseignants[ens_nom] = set()
 
+    # Liste de tous les enseignants actifs (non exclus)
     liste_tous_ens = surveillants[~surveillants['nom'].isin(exclus)]['nom'].tolist()
     if not liste_tous_ens:
         liste_tous_ens = surveillants['nom'].tolist()
     
+    # Initialisation globale du pointeur s'il n'existe pas
     if 'round_robin_pointer' not in st.session_state:
         st.session_state.round_robin_pointer = 0
 
     creneaux_actifs = st.session_state.get('creneaux_actifs', CRENEAUX_DEFAUT)
     charges_affectees_creneau = set()
+
+    # Fonction interne de recherche par Round-Robin continu et persistant
+    def trouver_surveillant_round_robin(qualite_souhaitee=None):
+        n_total = len(liste_tous_ens)
+        if n_total == 0:
+            return None, None
+            
+        for i in range(n_total):
+            # Calcul de l'index actuel basé sur le pointeur persistant global
+            ptr = (st.session_state.round_robin_pointer + i) % n_total
+            s_nom = liste_tous_ens[ptr]
+            
+            if s_nom in exclus:
+                continue
+            
+            row_s = surveillants[surveillants['nom'] == s_nom]
+            if row_s.empty:
+                continue
+            q_val = row_s.iloc[0]['qualite']
+            
+            if qualite_souhaitee and q_val != qualite_souhaitee:
+                continue
+            
+            creneaux_occupes_ens = disponibilites_enseignants.get(s_nom, set())
+            if creneau_key in creneaux_occupes_ens:
+                continue
+            
+            # Vérification anti-succession (pas 2 créneaux d'affilée)
+            anti_succession_val = False
+            if creneau_examen in creneaux_actifs:
+                idx_c = creneaux_actifs.index(creneau_examen)
+                if idx_c > 0:
+                    creneau_precedent = creneaux_actifs[idx_c - 1]
+                    if (d_key, creneau_precedent) in creneaux_occupes_ens:
+                        anti_succession_val = True
+            if anti_succession_val:
+                continue
+
+            quota = st.session_state.get(f"nb_surv_{q_val.lower()}", 3)
+            current_count = row_s.iloc[0]['surveillance_attribuee']
+            
+            if current_count < quota:
+                # Avancer et sauvegarder le pointeur global pour le prochain appel
+                st.session_state.round_robin_pointer = (ptr + 1) % n_total
+                return s_nom, q_val
+        
+        # Si aucun trouvé avec la qualité souhaitée, on réessaie sans contrainte de qualité
+        if qualite_souhaitee:
+            return trouver_surveillant_round_robin(None)
+            
+        return None, None
 
     for idx, examen in planning_df.iterrows():
         date_examen = examen.get('date', None)
@@ -373,6 +428,7 @@ def attribuer_surveillants(planning_df, enseignants_df):
         liste_surveillants = []
         cle_multi_lieux = (d_key, creneau_examen, matiere_examen, enseignant_matiere)
         
+        # 1. Affectation de l'enseignant responsable de la matière (si présent et disponible)
         if enseignant_matiere and str(enseignant_matiere) not in ['nan', '', 'None']:
             if cle_multi_lieux not in charges_affectees_creneau:
                 ens_info = surveillants[surveillants['nom'] == enseignant_matiere]
@@ -411,49 +467,7 @@ def attribuer_surveillants(planning_df, enseignants_df):
             target_vacataires = 0
             target_permanents = nb_surv_requis
 
-        def trouver_surveillant_round_robin(qualite_souhaitee=None):
-            n_total = len(liste_tous_ens)
-            if n_total == 0:
-                return None, None
-            ptr = st.session_state.round_robin_pointer % n_total
-            for i in range(n_total):
-                idx_courant = (ptr + i) % n_total
-                s_nom = liste_tous_ens[idx_courant]
-                if s_nom in exclus:
-                    continue
-                
-                row_s = surveillants[surveillants['nom'] == s_nom]
-                if row_s.empty:
-                    continue
-                q_val = row_s.iloc[0]['qualite']
-                
-                if qualite_souhaitee and q_val != qualite_souhaitee:
-                    continue
-                
-                creneaux_occupes_ens = disponibilites_enseignants.get(s_nom, set())
-                if creneau_key in creneaux_occupes_ens:
-                    continue
-                
-                anti_succession_val = False
-                if creneau_examen in creneaux_actifs:
-                    idx_c = creneaux_actifs.index(creneau_examen)
-                    if idx_c > 0:
-                        creneau_precedent = creneaux_actifs[idx_c - 1]
-                        if (d_key, creneau_precedent) in creneaux_occupes_ens:
-                            anti_succession_val = True
-                if anti_succession_val:
-                    continue
-
-                quota = st.session_state.get(f"nb_surv_{q_val.lower()}", 3)
-                current_count = row_s.iloc[0]['surveillance_attribuee']
-                if current_count < quota:
-                    st.session_state.round_robin_pointer = (idx_courant + 1) % n_total
-                    return s_nom, q_val
-            
-            if qualite_souhaitee:
-                return trouver_surveillant_round_robin(None)
-            return None, None
-
+        # 2. Compléter les surveillants requis via le Round-Robin continu
         while len(liste_surveillants) < nb_surv_requis:
             current_vacs = sum(1 for s in liste_surveillants if s['qualite'] == 'Vacataire')
             current_perms = sum(1 for s in liste_surveillants if s['qualite'] == 'Permanent')
