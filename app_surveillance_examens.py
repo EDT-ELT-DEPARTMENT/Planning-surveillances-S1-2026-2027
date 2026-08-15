@@ -36,6 +36,11 @@ CRENEAUX_DEFAUT = ["08h30 - 10h30", "11h00 - 13h00", "13h30 - 15h30"]
 JOURS_FR = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi", "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
 FICHIER_SOURCE = "DATA-ENS-2026-2027_surveillances.xlsx"
 
+def nettoyer_nom_feuille(nom):
+    """Nettoie le nom pour respecter les contraintes Excel (max 31 caractères et pas de caractères spéciaux interdits)."""
+    nom_propre = re.sub(r'[\\/\?\*\[\]:]', '', str(nom))
+    return nom_propre[:31]
+
 def init_session_state():
     defaults = {
         'enseignants_df': None, 'examens_df': None, 'planning_df': None,
@@ -554,7 +559,7 @@ def construire_grille_edt(attributions, creneaux_liste):
 def generer_excel_edt(df_grille, promotion):
     wb = Workbook()
     ws = wb.active
-    ws.title = f"EDT {promotion}"
+    ws.title = nettoyer_nom_feuille(f"EDT {promotion}")
     header_fill = PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid")
     header_font = Font(color="FFFFFF", bold=True, size=11)
     creneau_fill = PatternFill(start_color="E3F2FD", end_color="E3F2FD", fill_type="solid")
@@ -772,7 +777,7 @@ def generer_tableau_html(attributions, creneaux_utilises):
 def generer_excel_colore(attributions):
     wb = Workbook()
     ws = wb.active
-    ws.title = "Planning Global"
+    ws.title = nettoyer_nom_feuille("Planning Global")
     data = []
     for attr in attributions:
         date_val = attr.get('date', None)
@@ -1394,7 +1399,7 @@ def main():
                             with b_ind1:
                                 st.download_button(f"HTML - {promo}", generer_html_edt(df_g, promo), f"EDT_{promo}.html", "text/html", key=f"rep_html_{promo}")
                             with b_ind2:
-                                st.download_button(f"Excel - {promo}", generer_excel_edt(df_g, promo), f"EDT_{promo}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.spreadsheet", key=f"rep_xlsx_{promo}")
+                                st.download_button(f"Excel - {promo}", generer_excel_edt(df_g, promo), f"EDT_{promo}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"rep_xlsx_{promo}")
                             with b_ind3:
                                 st.download_button(f"PDF - {promo}", generer_pdf_edt(attr_promo, promo, st.session_state.creneaux_actifs), f"EDT_{promo}.pdf", "application/pdf", key=f"rep_pdf_{promo}")
                 else:
@@ -1416,3 +1421,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+```[cite: 4]
