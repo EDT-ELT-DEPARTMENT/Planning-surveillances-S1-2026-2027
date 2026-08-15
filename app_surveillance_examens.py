@@ -1133,7 +1133,7 @@ def main():
         st.markdown("---")
         st.info("💡 Vendredi et Samedi exclus. Dimanche est travaillable.")
 
-    tabs = st.tabs(["🏠 Accueil", "👥 Enseignants", "📚 Planning par Promotion", "🎯 Attributions", "📅 EDT par Promotion", "📂 Répertoire des EDTs", "📊 Export Global"])
+    tabs = st.tabs(["🏠 Accueil", "👥 Enseignants", "📚 Planning par Promotion", "🎯 Attributions", "📅 EDT par Promotion", "📂 Répertoire des EDTs", "📊 Export Global", "📤 Envoyer l'EDT par E-mail (Surveillance)"])
 
     with tabs[0]:
         st.markdown(f"""
@@ -1597,6 +1597,120 @@ def main():
             st.markdown("---")
             st.markdown(generer_tableau_html(attributions, st.session_state.creneaux_actifs), unsafe_allow_html=True)
         else: st.warning("Aucune attribution à exporter.")
+
+    with tabs[7]:
+
+        st.markdown("### Module : 📤 Envoyer l'EDT par E-mail (Surveillance)")
+
+        # Simulation / Chargement des données (À adapter selon votre source ou base Supabase)
+        # Disposition requise : Enseignements, Code, Enseignants, Horaire, Jours, Lieu, Promotion, [Email]
+        st.sidebar.header("Paramètres SMTP")
+        smtp_server = st.sidebar.text_input("Serveur SMTP", "smtp.gmail.com")
+        smtp_port = st.sidebar.number_input("Port", value=587)
+        sender_email = st.sidebar.text_input("E-mail expéditeur")
+        sender_password = st.sidebar.text_input("Mot de passe application", type="password")
+
+        uploaded_file = st.file_uploader("Importer le fichier source des surveillances (Excel/CSV)", type=["xlsx", "csv"])
+
+        if uploaded_file is not None:
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
+            else:
+                df = pd.read_excel(uploaded_file)
+
+            st.success("Fichier chargé avec succès !")
+
+            # Vérification des colonnes requises
+            colonnes_requises = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Email']
+            if all(col in df.columns for col in colonnes_requises):
+
+                enseignants_list = df['Enseignants'].dropna().unique()
+
+                tab_indiv, tab_groupe = st.tabs(["👤 Envoi Individuel", "👥 Envoi par Groupe (Masse)"])
+
+                # --- 1. ENVOI INDIVIDUEL ---
+                with tab_indiv:
+                    st.subheader("Gestion et Envoi Individuel")
+                    selected_prof = st.selectbox("Sélectionner un enseignant", enseignants_list)
+
+                    # Filtrage pour l'enseignant sélectionné
+                    df_prof = df[df['Enseignants'] == selected_prof]
+                    prof_email = df_prof['Email'].iloc[0] if not df_prof.empty else ""
+
+                    st.text(f"E-mail associé : {prof_email if prof_email else 'Aucun e-mail trouvé'}")
+                    st.markdown("**Planning de surveillance affecté :**")
+                    st.dataframe(df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion']])
+
+                    custom_msg = st.text_area("Message personnalisé (optionnel)", "Bonjour,\n\nVeuillez trouver ci-joint votre planning de surveillance pour les examens.\n\nCordialement,")
+
+                    if st.button("Envoyer l'EDT à cet enseignant"):
+                        if not prof_email:
+                            st.error("Impossible d'envoyer : l'adresse e-mail est manquante pour cet enseignant.")
+                        elif not sender_email or not sender_password:
+                            st.error("Veuillez configurer les paramètres SMTP dans la barre latérale.")
+                        else:
+                            try:
+                                msg = MIMEMultipart()
+                                msg['From'] = sender_email
+                                msg['To'] = prof_email
+                                msg['Subject'] = "Plateforme de gestion des EDTs-S2-2026 - Votre planning de surveillance"
+
+                                corps_tableau = df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion']].to_html(index=False)
+                                html_content = f"<p>{custom_msg.replace(chr(10), '<br>')}</p>{corps_tableau}"
+                                msg.attach(MIMEText(html_content, 'html'))
+
+                                server = smtplib.SMTP(smtp_server, smtp_port)
+                                server.starttls()
+                                server.login(sender_email, sender_password)
+                                server.sendmail(sender_email, prof_email, msg.as_string())
+                                server.quit()
+
+                                st.success(f"E-mail envoyé avec succès à {selected_prof} ({prof_email}) !")
+                            except Exception as e:
+                                st.error(f"Erreur lors de l'envoi : {e}")
+
+                # --- 2. ENVOI PAR GROUPE ---
+                with tab_groupe:
+                    st.subheader("Envoi Groupé à tous les enseignants affectés")
+                    st.info("Cette action va parcourir l'ensemble du fichier source, extraire les plannings et les adresses e-mails de chaque enseignant, puis envoyer les notifications correspondantes.")
+
+                    if st.button("Lancer l'envoi groupé"):
+                        if not sender_email or not sender_password:
+                            st.error("Veuillez configurer les paramètres SMTP dans la barre latérale.")
+                        else:
+                            try:
+                                server = smtplib.SMTP(smtp_server, smtp_port)
+                                server.starttls()
+                                server.login(sender_email, sender_password)
+
+                                barre_progression = st.progress(0)
+                                total = len(enseignants_list)
+
+                                for i, prof in enumerate(enseignants_list):
+                                    df_prof = df[df['Enseignants'] == prof]
+                                    prof_email = df_prof['Email'].iloc[0] if not df_prof.empty else ""
+
+                                    if prof_email and pd.notna(prof_email):
+                                        msg = MIMEMultipart()
+                                        msg['From'] = sender_email
+                                        msg['To'] = prof_email
+                                        msg['Subject'] = "Plateforme de gestion des EDTs-S2-2026 - Votre planning de surveillance"
+
+                                        corps_tableau = df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion']].to_html(index=False)
+                                        html_content = f"<p>Bonjour Pr./Dr. {prof},<br><br>Veuillez trouver ci-dessous votre planning de surveillance extrait de la Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA :</p>{corps_tableau}"
+                                        msg.attach(MIMEText(html_content, 'html'))
+
+                                        server.sendmail(sender_email, prof_email, msg.as_string())
+
+                                    barre_progression.progress((i + 1) / total)
+
+                                server.quit()
+                                st.success("L'envoi groupé de tous les emplois du temps de surveillance a été effectué avec succès !")
+                            except Exception as e:
+                                st.error(f"Erreur lors de l'envoi groupé : {e}")
+
+            else:
+                st.error(f"Le fichier importé ne respecte pas la disposition requise. Colonnes attendues : {colonnes_requises}")
 
 if __name__ == "__main__":
     main()
