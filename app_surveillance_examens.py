@@ -123,6 +123,46 @@ def init_session_state():
         if key not in st.session_state:
             st.session_state[key] = value
 
+def compter_enseignants_quota_atteint(enseignants_df, quotas):
+    """Compte les enseignants qui ont atteint leur quota max"""
+    if enseignants_df is None or enseignants_df.empty:
+        return {}
+    
+    comptage = {}
+    for qualite in ['Permanent', 'Vacataire', 'Autre']:
+        quota = quotas.get(qualite, 6)
+        ens_qualite = enseignants_df[enseignants_df['qualite'] == qualite]
+        nb_total = len(ens_qualite)
+        nb_quota_atteint = len(ens_qualite[ens_qualite.get('surveillance_attribuee', 0) >= quota])
+        comptage[qualite] = {
+            'total': nb_total,
+            'quota_atteint': nb_quota_atteint,
+            'quota_value': quota
+        }
+    return comptage
+
+def compter_effectif_par_lieu(surveillance_df):
+    """Compte le nombre d'enseignants assignés par lieu"""
+    if surveillance_df is None:
+        return {}
+    
+    effectif = {}
+    for attr in surveillance_df:
+        lieu = attr.get('lieu', 'Non spécifié')
+        if lieu not in effectif:
+            effectif[lieu] = set()
+        
+        # Ajouter les surveillants
+        for surv in attr.get('details_surveillants', []):
+            effectif[lieu].add(surv['nom'])
+        
+        # Ajouter le chargé de matière
+        if attr.get('enseignant'):
+            effectif[lieu].add(attr.get('enseignant'))
+    
+    # Convertir sets en nombres
+    return {lieu: len(noms) for lieu, noms in effectif.items()}
+
 def normaliser_qualite(val):
     val = str(val).strip().lower()
     if 'vacataire' in val or 'charg' in val or 'contractuel' in val or 'doctorant' in val:
@@ -1340,6 +1380,45 @@ def main():
         st.session_state.nb_surv_permanent = st.number_input("Permanent", 0, 20, st.session_state.nb_surv_permanent, key="w_qp")
         st.session_state.nb_surv_vacataire = st.number_input("Vacataire", 0, 20, st.session_state.nb_surv_vacataire, key="w_qv")
         st.session_state.nb_surv_autre = st.number_input("Autre", 0, 20, st.session_state.nb_surv_autre, key="w_qa")
+        
+        # 🔢 Afficheur: Enseignants ayant atteint leur quota
+        if st.session_state.data_loaded and st.session_state.enseignants_df is not None:
+            quotas_dict = {
+                'Permanent': st.session_state.nb_surv_permanent,
+                'Vacataire': st.session_state.nb_surv_vacataire,
+                'Autre': st.session_state.nb_surv_autre
+            }
+            comptage_quota = compter_enseignants_quota_atteint(st.session_state.enseignants_df, quotas_dict)
+            
+            st.markdown("#### 🎯 Enseignants ayant atteint leur quota")
+            for qualite, data in comptage_quota.items():
+                if data['total'] > 0:
+                    pourcentage = (data['quota_atteint'] / data['total']) * 100
+                    st.metric(
+                        label=f"{qualite} (Quota: {data['quota_value']})",
+                        value=f"{data['quota_atteint']} / {data['total']}",
+                        delta=f"{pourcentage:.0f}%"
+                    )
+        
+        # 📍 Afficheur: Effectif par lieu
+        if st.session_state.surveillance_df is not None and len(st.session_state.surveillance_df) > 0:
+            effectif_lieux = compter_effectif_par_lieu(st.session_state.surveillance_df)
+            
+            st.markdown("#### 📍 Effectif par Lieu")
+            if effectif_lieux:
+                # Séparer salles et amphis
+                salles = {k: v for k, v in sorted(effectif_lieux.items()) if k.startswith('S')}
+                amphis = {k: v for k, v in sorted(effectif_lieux.items()) if k.startswith('A')}
+                
+                if salles:
+                    st.markdown("**Salles:**")
+                    for lieu, nb in salles.items():
+                        st.write(f"🏫 {lieu}: {nb} enseignant(s)")
+                
+                if amphis:
+                    st.markdown("**Amphithéâtres:**")
+                    for lieu, nb in amphis.items():
+                        st.write(f"🎓 {lieu}: {nb} enseignant(s)")
         
         st.markdown("#### 🏛️ Quotas par Type de Lieu")
         st.session_state.nb_surv_par_salle = st.number_input("Surv. par Salle", 1, 5, st.session_state.nb_surv_par_salle, key="w_ns")
