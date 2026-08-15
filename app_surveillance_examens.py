@@ -883,20 +883,83 @@ def generer_pdf(attributions):
     doc.build(elements)
     buffer.seek(0)
     return buffer
+
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+import streamlit as st
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta, date
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.utils.dataframe import dataframe_to_rows
+import io
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import landscape, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.units import cm
+import os
+import re
 
+# Titre de la plateforme selon les consignes
+TITRE_PLATEFORME = "Plateforme de gestion des EDTs-S1-2027-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA"
+
+st.set_page_config(page_title=TITRE_PLATEFORME, page_icon="📋", layout="wide", initial_sidebar_state="expanded")
+
+def envoyer_code_otp(nom_etud, email_dest, code_otp):
+    """Envoie le code OTP à l'enseignant via SMTP."""
+    body = f"Bonjour {nom_etud},\n\nVotre code d'accès à la Plateforme de Suivi d'Assiduité est : {code_otp}\n\nCe code est valable 10 minutes.\n\ndépartement d'Électrotechnique - FGE/UDL-SBA"
+    
+    msg = MIMEText(body)
+    msg["Subject"] = "Code d'accès - Plateforme Assiduité"
+    msg["From"] = "chef.department.elt.fge@gmail.com"
+    msg["To"] = str(email_dest).strip()
+    
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        # Utilisation des paramètres fournis[cite: 1]
+        server.login("chef.department.elt.fge@gmail.com", "gkzs pdza yodb icvd")
+        server.sendmail(msg["From"], msg["To"], msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        st.error(f"Erreur d'envoi OTP : {e}")
+        return False
+
+# --- Fonction d'envoi d'e-mail (EDT) ---
 def envoyer_email_edt(destinataire, sujet, corps, fichier_buffer, nom_fichier_piece):
-    """Envoie un e-mail avec l'EDT en pièce jointe via SMTP."""
-    # Récupération des paramètres de configuration depuis st.session_state
-    smtp_server = st.session_state.get('smtp_server', 'smtp.gmail.com')
-    smtp_port = st.session_state.get('smtp_port', 587)
-    smtp_user = st.session_state.get('smtp_user', 'chef.department.elt.fge@gmail.com')
-    smtp_password = st.session_state.get('smtp_password', '')
+    """Envoie un e-mail avec l'EDT en pièce jointe."""
+    smtp_user = "chef.department.elt.fge@gmail.com"
+    smtp_password = "gkzs pdza yodb icvd"
+    
+    msg = MIMEMultipart()
+    msg['From'] = smtp_user
+    msg['To'] = destinataire
+    msg['Subject'] = sujet
+    msg.attach(MIMEText(corps, 'plain', 'utf-8'))
 
+    if fichier_buffer and nom_fichier_piece:
+        fichier_buffer.seek(0)
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(fichier_buffer.read())
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', f'attachment; filename="{nom_fichier_piece}"')
+        msg.attach(part)
+
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(smtp_user, smtp_password)
+        server.sendmail(smtp_user, destinataire, msg.as_string())
+        server.quit()
+        return True, "E-mail envoyé avec succès !"
+    except Exception as e:
+        return False, f"Erreur lors de l'envoi : {str(e)}"
     # Création du message
     msg = MIMEMultipart()
     msg['From'] = smtp_user
