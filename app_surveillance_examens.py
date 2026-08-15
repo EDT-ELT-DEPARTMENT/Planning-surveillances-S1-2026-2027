@@ -883,13 +883,57 @@ def generer_pdf(attributions):
     doc.build(elements)
     buffer.seek(0)
     return buffer
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 
 def envoyer_email_edt(destinataire, sujet, corps, fichier_buffer, nom_fichier_piece):
     """Envoie un e-mail avec l'EDT en pièce jointe via SMTP."""
-    smtp_server = st.session_state.get('gkzs pdza yodb icvd', 'chef.department.elt.fge@gmail.com')
+    # Récupération des paramètres de configuration depuis st.session_state
+    smtp_server = st.session_state.get('smtp_server', 'smtp.gmail.com')
     smtp_port = st.session_state.get('smtp_port', 587)
-    smtp_user = st.session_state.get('smtp_user', '')
+    smtp_user = st.session_state.get('smtp_user', 'chef.department.elt.fge@gmail.com')
     smtp_password = st.session_state.get('smtp_password', '')
+
+    # Création du message
+    msg = MIMEMultipart()
+    msg['From'] = smtp_user
+    msg['To'] = destinataire
+    msg['Subject'] = sujet
+
+    # Ajout du corps du message
+    msg.attach(MIMEText(corps, 'plain', 'utf-8'))
+
+    # Gestion de la pièce jointe à partir du buffer (BytesIO)
+    if fichier_buffer is not None and nom_fichier_piece:
+        try:
+            fichier_buffer.seek(0)
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(fichier_buffer.read())
+            encoders.encode_base64(part)
+            part.add_header(
+                'Content-Disposition',
+                f'attachment; filename="{nom_fichier_piece}"'
+            )
+            msg.attach(part)
+        except Exception as e:
+            print(f"Erreur lors de l'attachement du fichier : {e}")
+            return False
+
+    # Connexion et envoi via SMTP
+    try:
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()  # Sécurisation de la connexion
+        if smtp_user and smtp_password:
+            server.login(smtp_user, smtp_password)
+        server.sendmail(smtp_user, destinataire, msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        print(f"Erreur lors de l'envoi de l'e-mail : {e}")
+        return False
 
     if not smtp_user or not smtp_password:
         return False, "Veuillez configurer vos paramètres SMTP dans la barre latérale."
