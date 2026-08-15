@@ -123,7 +123,7 @@ def init_session_state():
         if key not in st.session_state:
             st.session_state[key] = value
 
-def compter_enseignants_quota_atteint(enseignants_df, quotas):
+def compter_enseignants_quota_atteint(surveillance_df, quotas):
     """Compte les enseignants qui ont atteint leur quota max"""
     if enseignants_df is None or enseignants_df.empty:
         return {}
