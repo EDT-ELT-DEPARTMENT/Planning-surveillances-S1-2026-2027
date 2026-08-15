@@ -1607,8 +1607,8 @@ def main():
         st.sidebar.header("Paramètres SMTP")
         smtp_server = st.sidebar.text_input("Serveur SMTP", "smtp.gmail.com")
         smtp_port = st.sidebar.number_input("Port", value=587)
-        sender_email = st.sidebar.text_input("E-mail expéditeur")
-        sender_password = st.sidebar.text_input("Mot de passe application", type="password")
+        sender_email = st.sidebar.text_input("chef.department.elt.fge@gmail.com")
+        sender_password = st.sidebar.text_input("gkzs pdza yodb icvd", type="password")
 
         uploaded_file = st.file_uploader("Importer le fichier source des surveillances (Excel/CSV)", type=["xlsx", "csv"])
 
