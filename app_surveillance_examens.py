@@ -41,10 +41,71 @@ CRENEAUX_DEFAUT = ["08h30 - 10h30", "11h00 - 13h00", "13h30 - 15h30"]
 JOURS_FR = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi", "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
 FICHIER_SOURCE = "DATA-ENS-2026-2027_surveillances.xlsx"
 
+# Paramètres SMTP par défaut (hardcodés)
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_USER = "chef.department.elt.fge@gmail.com"
+SMTP_PASSWORD = "gkzs pdza yodb icvd"
+
+# Fichier de persistance des EDTs
+FICHIER_PERSISTANCE = "edt_persistence.pkl"
+
 def nettoyer_nom_feuille(nom):
     """Nettoie le nom pour respecter les contraintes Excel (max 31 caractères et pas de caractères spéciaux interdits)."""
     nom_propre = re.sub(r'[\\/\?\*\[\]:]', '', str(nom))
     return nom_propre[:31]
+
+import pickle
+
+def sauvegarder_persistence():
+    """Sauvegarde les données critiques sur disque pour persistance après déconnexion."""
+    try:
+        data = {
+            'planning_df': st.session_state.get('planning_df'),
+            'surveillance_df': st.session_state.get('surveillance_df'),
+            'historique_edt': st.session_state.get('historique_edt'),
+            'enseignants_df': st.session_state.get('enseignants_df'),
+            'examens_df': st.session_state.get('examens_df'),
+            'promotions_list': st.session_state.get('promotions_list'),
+            'permanents_list': st.session_state.get('permanents_list'),
+            'vacataires_list': st.session_state.get('vacataires_list'),
+            'all_enseignants_list': st.session_state.get('all_enseignants_list'),
+            'data_loaded': st.session_state.get('data_loaded'),
+            'promo_selected': st.session_state.get('promo_selected'),
+            'creneaux_actifs': st.session_state.get('creneaux_actifs'),
+            'lieux_par_promo': st.session_state.get('lieux_par_promo'),
+            'groupes_par_promo': st.session_state.get('groupes_par_promo'),
+            'fractionnement_actif': st.session_state.get('fractionnement_actif'),
+            'jours_feries': st.session_state.get('jours_feries'),
+            'jours_feries_list': st.session_state.get('jours_feries_list'),
+            'exclus_manuels': st.session_state.get('exclus_manuels'),
+            'nb_surv_permanent': st.session_state.get('nb_surv_permanent'),
+            'nb_surv_vacataire': st.session_state.get('nb_surv_vacataire'),
+            'nb_surv_autre': st.session_state.get('nb_surv_autre'),
+            'nb_surv_par_salle': st.session_state.get('nb_surv_par_salle'),
+            'nb_surv_par_amphi': st.session_state.get('nb_surv_par_amphi'),
+            'date_debut_val': st.session_state.get('date_debut_val'),
+            'date_fin_val': st.session_state.get('date_fin_val'),
+            'nb_par_jour': st.session_state.get('nb_par_jour'),
+        }
+        with open(FICHIER_PERSISTANCE, 'wb') as f:
+            pickle.dump(data, f)
+    except Exception as e:
+        pass
+
+def charger_persistence():
+    """Recharge les données sauvegardées depuis le disque."""
+    if os.path.exists(FICHIER_PERSISTANCE):
+        try:
+            with open(FICHIER_PERSISTANCE, 'rb') as f:
+                data = pickle.load(f)
+            for key, value in data.items():
+                if key not in st.session_state or st.session_state.get(key) is None:
+                    st.session_state[key] = value
+            return True
+        except Exception as e:
+            return False
+    return False
 
 def init_session_state():
     defaults = {
@@ -485,7 +546,7 @@ def attribuer_surveillants(planning_df, enseignants_df):
                 q_needed = 'Permanent'
                 
             s_nom, q_val = trouver_surveillant_round_robin(q_needed)
-            if s_nom and s_nom not in [s['nom'] for s in liste_surveillants]:
+            if s_nom:
                 liste_surveillants.append({'nom': s_nom, 'qualite': q_val, 'priorite': 'Surveillant'})
                 disponibilites_enseignants[s_nom].add(creneau_key)
                 surveillants.loc[surveillants['nom'] == s_nom, 'surveillance_attribuee'] += 1
@@ -1028,6 +1089,7 @@ def envoyer_email_edt(destinataire, sujet, corps, fichier_buffer, nom_fichier_pi
 
 def main():
     init_session_state()
+    charger_persistence()
     st.markdown(f'<div class="main-header">{TITRE_PLATEFORME}</div>', unsafe_allow_html=True)
 
     if not st.session_state.data_loaded:
@@ -1122,13 +1184,6 @@ def main():
                         st.session_state.jours_feries_list.remove(jf_item)
                         st.session_state.jours_feries = sorted(st.session_state.jours_feries_list)
                         st.rerun()
-
-        st.markdown("---")
-        st.markdown("### 📧 Configuration E-mail (SMTP)")
-        st.session_state['smtp_server'] = st.text_input("Serveur SMTP", value="smtp.gmail.com", key="w_smtp_srv")
-        st.session_state['smtp_port'] = st.number_input("Port SMTP", value=587, key="w_smtp_port")
-        st.session_state['smtp_user'] = st.text_input("Adresse e-mail expéditeur", value="", key="w_smtp_user")
-        st.session_state['smtp_password'] = st.text_input("Mot de passe / Token d'application", type="password", value="", key="w_smtp_pwd")
 
         st.markdown("---")
         st.info("💡 Vendredi et Samedi exclus. Dimanche est travaillable.")
@@ -1288,8 +1343,18 @@ def main():
                                 if promo_selected in st.session_state.horaires_par_matiere and m_nom in st.session_state.horaires_par_matiere[promo_selected]:
                                     del st.session_state.horaires_par_matiere[promo_selected][m_nom]
                                 
+                # Vérification anti-régénération
+                deja_genere = promo_selected in st.session_state.get('historique_edt', {}) and bool(st.session_state.historique_edt.get(promo_selected))
+                if deja_genere:
+                    st.warning(f"⚠️ Un EDT existe déjà pour la promotion **{promo_selected}**. Vous pouvez le consulter dans les onglets 📅 EDT par Promotion ou 📂 Répertoire des EDTs.")
+                    force_regen = st.checkbox(f"🔄 Forcer la régénération (écraser l'EDT existant de {promo_selected})", key=f"force_regen_{promo_selected}")
+                else:
+                    force_regen = True
+
                 if st.button(f"🚀 Générer l'EDT pour {promo_selected}", type="primary", key=f"btn_gen_{promo_selected}"):
-                    if len(lieux_sel) == 0: 
+                    if not force_regen:
+                        st.error("❌ Régénération refusée. Cochez 'Forcer la régénération' pour écraser l'EDT existant.")
+                    elif len(lieux_sel) == 0: 
                         st.error("❌ Sélectionnez au moins un lieu.")
                     else:
                         if st.session_state.planning_df is None:
@@ -1332,6 +1397,7 @@ def main():
                             promo_subset = df_updated[df_updated['Promotion'].astype(str).str.strip() == str(promo_selected).strip()]
                             st.session_state.historique_edt[promo_selected] = promo_subset.to_dict('records')
                             st.success(f"✅ Génération avec unification des lieux et sous-groupes effectuée pour la promotion {promo_selected} !")
+                            sauvegarder_persistence()
 
                 if st.session_state.planning_df is not None:
                     st.markdown("---")
@@ -1415,6 +1481,7 @@ def main():
                         st.session_state.surveillance_df = attributions
                         st.session_state.enseignants_df = ens_maj
                         st.success(f"✅ {len(attributions)} attributions effectuées avec succès selon les règles en vigueur !")
+                        sauvegarder_persistence()
                     else: st.error("❌ Erreur lors de l'attribution.")
             if st.session_state.surveillance_df is not None:
                 st.markdown("---")
@@ -1601,14 +1668,16 @@ def main():
     with tabs[7]:
         st.markdown('<div class="sub-header">📤 Envoyer l''EDT par E-mail (Surveillance)</div>', unsafe_allow_html=True)
 
-        # Récupération de la configuration SMTP depuis la sidebar générale
-        smtp_server = st.session_state.get('smtp_server', 'smtp.gmail.com')
-        smtp_port = st.session_state.get('smtp_port', 587)
-        sender_email = st.session_state.get('smtp_user', '')
-        sender_password = st.session_state.get('smtp_password', '')
+        # Paramètres SMTP hardcodés (non modifiables via l'interface)
+        smtp_server = SMTP_SERVER
+        smtp_port = SMTP_PORT
+        sender_email = SMTP_USER
+        sender_password = SMTP_PASSWORD
+
+        st.info(f"📧 Configuration SMTP active : {sender_email} via {smtp_server}:{smtp_port}")
 
         if not sender_email or not sender_password:
-            st.warning("⚠️ Veuillez configurer les paramètres SMTP dans la barre latérale (📧 Configuration E-mail).")
+            st.error("⚠️ Les paramètres SMTP ne sont pas configurés. Vérifiez les constantes SMTP_USER et SMTP_PASSWORD dans le code.")
 
         # --- Vérification des attributions disponibles ---
         if st.session_state.surveillance_df is None or len(st.session_state.surveillance_df) == 0:
@@ -1617,8 +1686,6 @@ def main():
             st.success(f"✅ {len(st.session_state.surveillance_df)} attributions de surveillance disponibles.")
 
             # Conversion des attributions en DataFrame exploitable
-            # NOTE : on regroupe par enseignant pour éviter les doublons si un même
-            #        enseignant apparaît plusieurs fois dans details_surveillants
             rows = []
             for attr in st.session_state.surveillance_df:
                 date_val = attr.get('date')
@@ -1627,14 +1694,12 @@ def main():
                 if hasattr(date_val, 'strftime'):
                     date_str = date_val.strftime('%d/%m/%Y')
                     jour = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
-                # Liste unique des surveillants pour cet examen (anti-doublon)
                 noms_uniques = []
                 for s in attr.get('details_surveillants', []):
                     if s['nom'] not in noms_uniques:
                         noms_uniques.append(s['nom'])
                         rows.append({
                             'Enseignements': attr.get('matiere', ''),
-                            'Code': f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}",
                             'Enseignants': s['nom'],
                             'Horaire': attr.get('creneau', ''),
                             'Jours': jour,
@@ -1647,7 +1712,7 @@ def main():
             df_attributions = pd.DataFrame(rows)
 
             st.markdown("**📋 Aperçu des surveillances extraites des attributions :**")
-            st.dataframe(df_attributions[['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']], use_container_width=True, hide_index=True)
+            st.dataframe(df_attributions[['Enseignements', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']], use_container_width=True, hide_index=True)
 
             st.markdown("---")
             st.markdown("### 📧 Import du mapping Enseignant → Email")
@@ -1685,7 +1750,6 @@ def main():
                 selected_prof = st.selectbox("Sélectionner un surveillant", enseignants_list, key="email_select_prof")
 
                 df_prof = df[df['Enseignants'] == selected_prof]
-                # DÉDUPLICATION : garder une seule ligne par examen pour l'enseignant
                 df_prof = df_prof.drop_duplicates(subset=['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe'])
 
                 prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and 'Email' in df_prof.columns and pd.notna(df_prof['Email'].iloc[0]) and str(df_prof['Email'].iloc[0]).strip() != '' else ""
@@ -1700,7 +1764,7 @@ def main():
                     if not prof_email:
                         st.error("Impossible d'envoyer : l'adresse e-mail est manquante pour cet enseignant. Importez un fichier de mapping avec la colonne 'Email'.")
                     elif not sender_email or not sender_password:
-                        st.error("Veuillez configurer les paramètres SMTP dans la barre latérale.")
+                        st.error("Les paramètres SMTP ne sont pas configurés.")
                     else:
                         try:
                             msg = MIMEMultipart()
@@ -1729,7 +1793,7 @@ def main():
 
                 if st.button("Lancer l'envoi groupé", key="email_btn_group"):
                     if not sender_email or not sender_password:
-                        st.error("Veuillez configurer les paramètres SMTP dans la barre latérale.")
+                        st.error("Les paramètres SMTP ne sont pas configurés.")
                     else:
                         try:
                             server = smtplib.SMTP(smtp_server, smtp_port)
@@ -1743,7 +1807,6 @@ def main():
 
                             for i, prof in enumerate(enseignants_list):
                                 df_prof = df[df['Enseignants'] == prof]
-                                # DÉDUPLICATION : garder une seule ligne par examen
                                 df_prof = df_prof.drop_duplicates(subset=['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe'])
 
                                 prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and 'Email' in df_prof.columns and pd.notna(df_prof['Email'].iloc[0]) and str(df_prof['Email'].iloc[0]).strip() != '' else ""
