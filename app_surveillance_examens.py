@@ -485,7 +485,7 @@ def attribuer_surveillants(planning_df, enseignants_df):
                 q_needed = 'Permanent'
                 
             s_nom, q_val = trouver_surveillant_round_robin(q_needed)
-            if s_nom:
+            if s_nom and s_nom not in [s['nom'] for s in liste_surveillants]:
                 liste_surveillants.append({'nom': s_nom, 'qualite': q_val, 'priorite': 'Surveillant'})
                 disponibilites_enseignants[s_nom].add(creneau_key)
                 surveillants.loc[surveillants['nom'] == s_nom, 'surveillance_attribuee'] += 1
@@ -1617,6 +1617,8 @@ def main():
             st.success(f"✅ {len(st.session_state.surveillance_df)} attributions de surveillance disponibles.")
 
             # Conversion des attributions en DataFrame exploitable
+            # NOTE : on regroupe par enseignant pour éviter les doublons si un même
+            #        enseignant apparaît plusieurs fois dans details_surveillants
             rows = []
             for attr in st.session_state.surveillance_df:
                 date_val = attr.get('date')
@@ -1625,19 +1627,23 @@ def main():
                 if hasattr(date_val, 'strftime'):
                     date_str = date_val.strftime('%d/%m/%Y')
                     jour = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
+                # Liste unique des surveillants pour cet examen (anti-doublon)
+                noms_uniques = []
                 for s in attr.get('details_surveillants', []):
-                    rows.append({
-                        'Enseignements': attr.get('matiere', ''),
-                        'Code': f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}",
-                        'Enseignants': s['nom'],
-                        'Horaire': attr.get('creneau', ''),
-                        'Jours': jour,
-                        'Lieu': attr.get('lieu', ''),
-                        'Promotion': attr.get('promotion', ''),
-                        'Groupe': attr.get('groupe', 'Global'),
-                        'Date': date_str,
-                        'Email': ''
-                    })
+                    if s['nom'] not in noms_uniques:
+                        noms_uniques.append(s['nom'])
+                        rows.append({
+                            'Enseignements': attr.get('matiere', ''),
+                            'Code': f"CODE-{abs(hash(attr.get('matiere', ''))) % 9000 + 1000}",
+                            'Enseignants': s['nom'],
+                            'Horaire': attr.get('creneau', ''),
+                            'Jours': jour,
+                            'Lieu': attr.get('lieu', ''),
+                            'Promotion': attr.get('promotion', ''),
+                            'Groupe': attr.get('groupe', 'Global'),
+                            'Date': date_str,
+                            'Email': ''
+                        })
             df_attributions = pd.DataFrame(rows)
 
             st.markdown("**📋 Aperçu des surveillances extraites des attributions :**")
@@ -1659,7 +1665,6 @@ def main():
                     st.error("❌ Le fichier de mapping doit contenir obligatoirement les colonnes 'Enseignants' et 'Email'.")
                 else:
                     df = df_attributions.merge(df_map[['Enseignants', 'Email']], on='Enseignants', how='left', suffixes=('', '_map'))
-                    # Si la fusion crée Email_map, on garde celle du mapping
                     if 'Email_map' in df.columns:
                         df['Email'] = df['Email_map']
                         df = df.drop(columns=['Email_map'])
@@ -1667,7 +1672,6 @@ def main():
             else:
                 st.info("💡 Aucun fichier de mapping importé. Les e-mails sont vides. Uploadez un fichier de mapping pour activer l'envoi.")
 
-            # Statistiques emails
             nb_avec_email = df['Email'].replace('', pd.NA).notna().sum() if 'Email' in df.columns else 0
             st.info(f"📊 {nb_avec_email} / {len(df)} lignes ont une adresse e-mail associée.")
 
@@ -1681,6 +1685,9 @@ def main():
                 selected_prof = st.selectbox("Sélectionner un surveillant", enseignants_list, key="email_select_prof")
 
                 df_prof = df[df['Enseignants'] == selected_prof]
+                # DÉDUPLICATION : garder une seule ligne par examen pour l'enseignant
+                df_prof = df_prof.drop_duplicates(subset=['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe'])
+
                 prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and 'Email' in df_prof.columns and pd.notna(df_prof['Email'].iloc[0]) and str(df_prof['Email'].iloc[0]).strip() != '' else ""
 
                 st.text(f"E-mail associé : {prof_email if prof_email else 'Aucun e-mail trouvé'}")
@@ -1715,49 +1722,52 @@ def main():
                         except Exception as e:
                             st.error(f"Erreur lors de l'envoi : {e}")
 
-                # --- 2. ENVOI PAR GROUPE ---
-                with tab_groupe:
-                    st.subheader("Envoi Groupé à tous les surveillants")
-                    st.info("Cette action va envoyer un e-mail à chaque surveillant listé dans les attributions, avec son planning personnel.")
+            # --- 2. ENVOI PAR GROUPE ---
+            with tab_groupe:
+                st.subheader("Envoi Groupé à tous les surveillants")
+                st.info("Cette action va envoyer un e-mail à chaque surveillant listé dans les attributions, avec son planning personnel.")
 
-                    if st.button("Lancer l'envoi groupé", key="email_btn_group"):
-                        if not sender_email or not sender_password:
-                            st.error("Veuillez configurer les paramètres SMTP dans la barre latérale.")
-                        else:
-                            try:
-                                server = smtplib.SMTP(smtp_server, smtp_port)
-                                server.starttls()
-                                server.login(sender_email, sender_password)
+                if st.button("Lancer l'envoi groupé", key="email_btn_group"):
+                    if not sender_email or not sender_password:
+                        st.error("Veuillez configurer les paramètres SMTP dans la barre latérale.")
+                    else:
+                        try:
+                            server = smtplib.SMTP(smtp_server, smtp_port)
+                            server.starttls()
+                            server.login(sender_email, sender_password)
 
-                                barre_progression = st.progress(0)
-                                total = len(enseignants_list)
-                                envoyes = 0
-                                echecs = 0
+                            barre_progression = st.progress(0)
+                            total = len(enseignants_list)
+                            envoyes = 0
+                            echecs = 0
 
-                                for i, prof in enumerate(enseignants_list):
-                                    df_prof = df[df['Enseignants'] == prof]
-                                    prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and 'Email' in df_prof.columns and pd.notna(df_prof['Email'].iloc[0]) and str(df_prof['Email'].iloc[0]).strip() != '' else ""
+                            for i, prof in enumerate(enseignants_list):
+                                df_prof = df[df['Enseignants'] == prof]
+                                # DÉDUPLICATION : garder une seule ligne par examen
+                                df_prof = df_prof.drop_duplicates(subset=['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe'])
 
-                                    if prof_email:
-                                        msg = MIMEMultipart()
-                                        msg['From'] = sender_email
-                                        msg['To'] = prof_email
-                                        msg['Subject'] = "Plateforme de gestion des EDTs-S2-2026 - Votre planning de surveillance"
+                                prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and 'Email' in df_prof.columns and pd.notna(df_prof['Email'].iloc[0]) and str(df_prof['Email'].iloc[0]).strip() != '' else ""
 
-                                        corps_tableau = df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']].to_html(index=False)
-                                        html_content = f"<p>Bonjour Pr./Dr. {prof},<br><br>Veuillez trouver ci-dessous votre planning de surveillance extrait de la Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA :</p>{corps_tableau}"
-                                        msg.attach(MIMEText(html_content, 'html'))
+                                if prof_email:
+                                    msg = MIMEMultipart()
+                                    msg['From'] = sender_email
+                                    msg['To'] = prof_email
+                                    msg['Subject'] = "Plateforme de gestion des EDTs-S2-2026 - Votre planning de surveillance"
 
-                                        server.sendmail(sender_email, prof_email, msg.as_string())
-                                        envoyes += 1
-                                    else:
-                                        echecs += 1
+                                    corps_tableau = df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']].to_html(index=False)
+                                    html_content = f"<p>Bonjour Pr./Dr. {prof},<br><br>Veuillez trouver ci-dessous votre planning de surveillance extrait de la Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA :</p>{corps_tableau}"
+                                    msg.attach(MIMEText(html_content, 'html'))
 
-                                    barre_progression.progress((i + 1) / total)
+                                    server.sendmail(sender_email, prof_email, msg.as_string())
+                                    envoyes += 1
+                                else:
+                                    echecs += 1
 
-                                server.quit()
-                                st.success(f"✅ Envoi groupé terminé : {envoyes} e-mail(s) envoyé(s), {echecs} sans adresse e-mail.")
-                            except Exception as e:
-                                st.error(f"Erreur lors de l'envoi groupé : {e}")
+                                barre_progression.progress((i + 1) / total)
+
+                            server.quit()
+                            st.success(f"✅ Envoi groupé terminé : {envoyes} e-mail(s) envoyé(s), {echecs} sans adresse e-mail.")
+                        except Exception as e:
+                            st.error(f"Erreur lors de l'envoi groupé : {e}")
 if __name__ == "__main__":
     main()
