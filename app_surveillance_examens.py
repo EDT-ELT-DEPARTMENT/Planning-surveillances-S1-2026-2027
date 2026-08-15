@@ -884,6 +884,41 @@ def generer_pdf(attributions):
     buffer.seek(0)
     return buffer
 
+def envoyer_email_edt(destinataire, sujet, corps, fichier_buffer, nom_fichier_piece):
+    """Envoie un e-mail avec l'EDT en pièce jointe via SMTP."""
+    smtp_server = st.session_state.get('smtp_server', 'smtp.gmail.com')
+    smtp_port = st.session_state.get('smtp_port', 587)
+    smtp_user = st.session_state.get('smtp_user', '')
+    smtp_password = st.session_state.get('smtp_password', '')
+
+    if not smtp_user or not smtp_password:
+        return False, "Veuillez configurer vos paramètres SMTP dans la barre latérale."
+
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = smtp_user
+        msg['To'] = destinataire
+        msg['Subject'] = sujet
+
+        msg.attach(MIMEText(corps, 'plain', 'utf-8'))
+
+        if fichier_buffer and nom_fichier_piece:
+            fichier_buffer.seek(0)
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(fichier_buffer.read())
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f'attachment; filename="{nom_fichier_piece}"')
+            msg.attach(part)
+
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(smtp_user, smtp_password)
+        server.sendmail(smtp_user, destinataire, msg.as_string())
+        server.quit()
+        return True, "E-mail envoyé avec succès !"
+    except Exception as e:
+        return False, f"Erreur lors de l'envoi : {str(e)}"
+
 def main():
     init_session_state()
     st.markdown(f'<div class="main-header">{TITRE_PLATEFORME}</div>', unsafe_allow_html=True)
@@ -980,6 +1015,13 @@ def main():
                         st.session_state.jours_feries_list.remove(jf_item)
                         st.session_state.jours_feries = sorted(st.session_state.jours_feries_list)
                         st.rerun()
+
+        st.markdown("---")
+        st.markdown("### 📧 Configuration E-mail (SMTP)")
+        st.session_state['smtp_server'] = st.text_input("Serveur SMTP", value="smtp.gmail.com", key="w_smtp_srv")
+        st.session_state['smtp_port'] = st.number_input("Port SMTP", value=587, key="w_smtp_port")
+        st.session_state['smtp_user'] = st.text_input("Adresse e-mail expéditeur", value="", key="w_smtp_user")
+        st.session_state['smtp_password'] = st.text_input("Mot de passe / Token d'application", type="password", value="", key="w_smtp_pwd")
 
         st.markdown("---")
         st.info("💡 Vendredi et Samedi exclus. Dimanche est travaillable.")
@@ -1351,7 +1393,7 @@ def main():
     with tabs[4]:
         st.markdown('<div class="sub-header">📅 EDT Chronologique en Grille par Promotion</div>', unsafe_allow_html=True)
         if st.session_state.surveillance_df is not None:
-            promo_sel_choisie = st.selectbox("🎯 Choisir la promotion à afficher et télécharger :", st.session_state.promotions_list, key="select_promo_unique_edt")
+            promo_sel_choisie = st.selectbox("🎯 Choisir la promotion à afficher, télécharger et envoyer :", st.session_state.promotions_list, key="select_promo_unique_edt")
             if promo_sel_choisie:
                 st.markdown(f"#### 🎓 Promotion: **{promo_sel_choisie}**")
                 attr_promo = [a for a in st.session_state.surveillance_df if str(a.get('promotion', '')).strip() == str(promo_sel_choisie).strip()]
@@ -1363,6 +1405,31 @@ def main():
                         with c1: st.download_button(f"⬇️ HTML - {promo_sel_choisie}", generer_html_edt(df_grille, promo_sel_choisie), f"EDT_{promo_sel_choisie}.html", "text/html", key=f"dl_html_{promo_sel_choisie}")
                         with c2: st.download_button(f"⬇️ Excel - {promo_sel_choisie}", generer_excel_edt(df_grille, promo_sel_choisie), f"EDT_{promo_sel_choisie}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_xlsx_{promo_sel_choisie}")
                         with c3: st.download_button(f"⬇️ PDF - {promo_sel_choisie}", generer_pdf_edt(attr_promo, promo_sel_choisie, st.session_state.creneaux_actifs), f"EDT_{promo_sel_choisie}.pdf", "application/pdf", key=f"dl_pdf_{promo_sel_choisie}")
+                        
+                        st.markdown("---")
+                        st.markdown("#### 📤 Envoyer l'EDT par E-mail")
+                        with st.form(key=f"form_email_{promo_sel_choisie}"):
+                            email_destinataire = st.text_input("Adresse e-mail du destinataire (Représentant de promotion / Enseignant)")
+                            sujet_email = st.text_input("Sujet", value=f"[{TITRE_PLATEFORME}] Emploi du temps - Promotion {promo_sel_choisie}")
+                            corps_email = st.text_area("Message", value=f"Bonjour,\n\nVeuillez trouver ci-joint l'emploi du temps des examens pour la promotion {promo_sel_choisie}.\n\nCordialement,\nDépartement d'Électrotechnique")
+                            
+                            submit_email = st.form_submit_button("📨 Envoyer par E-mail")
+                            if submit_email:
+                                if not email_destinataire:
+                                    st.error("Veuillez saisir une adresse e-mail valide.")
+                                else:
+                                    pdf_buffer = generer_pdf_edt(attr_promo, promo_sel_choisie, st.session_state.creneaux_actifs)
+                                    succes, message = envoyer_email_edt(
+                                        email_destinataire, 
+                                        sujet_email, 
+                                        corps_email, 
+                                        pdf_buffer, 
+                                        f"EDT_{promo_sel_choisie}.pdf"
+                                    )
+                                    if succes:
+                                        st.success(f"✅ {message}")
+                                    else:
+                                        st.error(f"❌ {message}")
                 else:
                     st.info(f"Aucune attribution trouvée pour la promotion {promo_sel_choisie}.")
         else: st.warning("⚠️ Veuillez d'abord générer les attributions.")
@@ -1426,4 +1493,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
