@@ -336,16 +336,13 @@ def attribuer_surveillants(planning_df, enseignants_df):
         if ens_nom not in disponibilites_enseignants:
             disponibilites_enseignants[ens_nom] = set()
 
-    # Liste de tous les enseignants actifs (non exclus)
     liste_tous_ens = surveillants[~surveillants['nom'].isin(exclus)]['nom'].tolist()
     if not liste_tous_ens:
         liste_tous_ens = surveillants['nom'].tolist()
     
-    # Initialisation globale du pointeur s'il n'existe pas
     if 'round_robin_pointer' not in st.session_state:
         st.session_state.round_robin_pointer = 0
 
-    # Sécurisation des créneaux par défaut pour éviter tout NameError
     creneaux_defaut_locaux = ['08h30 - 10h30']
     try:
         creneaux_actifs = st.session_state.get('creneaux_actifs', CRENEAUX_DEFAUT)
@@ -354,7 +351,6 @@ def attribuer_surveillants(planning_df, enseignants_df):
 
     charges_affectees_creneau = set()
 
-    # Fonction interne de recherche par Round-Robin continu et persistant
     def trouver_surveillant_round_robin(qualite_souhaitee=None):
         n_total = len(liste_tous_ens)
         if n_total == 0:
@@ -379,7 +375,6 @@ def attribuer_surveillants(planning_df, enseignants_df):
             if creneau_key in creneaux_occupes_ens:
                 continue
             
-            # Vérification anti-succession (pas 2 créneaux d'affilée)
             anti_succession_val = False
             if creneau_examen in creneaux_actifs:
                 idx_c = creneaux_actifs.index(creneau_examen)
@@ -431,7 +426,6 @@ def attribuer_surveillants(planning_df, enseignants_df):
         liste_surveillants = []
         cle_multi_lieux = (d_key, creneau_examen, matiere_examen, enseignant_matiere)
         
-        # 1. Affectation de l'enseignant responsable de la matière (si présent et disponible)
         if enseignant_matiere and str(enseignant_matiere) not in ['nan', '', 'None']:
             if cle_multi_lieux not in charges_affectees_creneau:
                 ens_info = surveillants[surveillants['nom'] == enseignant_matiere]
@@ -470,7 +464,6 @@ def attribuer_surveillants(planning_df, enseignants_df):
             target_vacataires = 0
             target_permanents = nb_surv_requis
 
-        # 2. Compléter les surveillants requis via le Round-Robin continu
         while len(liste_surveillants) < nb_surv_requis:
             current_vacs = sum(1 for s in liste_surveillants if s['qualite'] == 'Vacataire')
             current_perms = sum(1 for s in liste_surveillants if s['qualite'] == 'Permanent')
@@ -496,7 +489,7 @@ def attribuer_surveillants(planning_df, enseignants_df):
         })
         
     attributions = sorted(attributions, key=lambda x: (x.get('date', datetime.min if 'datetime' in globals() else str(x.get('date'))), creneaux_actifs.index(x.get('creneau')) if x.get('creneau') in creneaux_actifs else 0, x.get('promotion', '')))
-    # 🔄 Synchronisation stricte : Recalculer le compteur à partir des attributions réelles
+    
     surveillants['surveillance_attribuee'] = 0
     for attr in attributions:
         for s_nom in attr['surveillants']:
@@ -943,7 +936,7 @@ def main():
         st.markdown("#### 🏛️ Quotas par Type de Lieu")
         st.session_state.nb_surv_par_salle = st.number_input("Surv. par Salle", 1, 5, st.session_state.nb_surv_par_salle, key="w_ns")
         st.session_state.nb_surv_par_amphi = st.number_input("Surv. par Amphi", 1, 5, st.session_state.nb_surv_par_amphi, key="w_na")
-        st.markdown("<small style='color: #666;'>Règle active[cite: 7] : 1 vacataire & 2 permanents pour 3 surveillants (Amphi) | 2 permanents pour 2 surveillants (Salle).</small>", unsafe_allow_html=True)
+        st.markdown("<small style='color: #666;'>Règle active : 1 vacataire & 2 permanents pour 3 surveillants (Amphi) | 2 permanents pour 2 surveillants (Salle).</small>", unsafe_allow_html=True)
 
         st.markdown("---")
         st.markdown("### 📅 Période & Cadence")
@@ -992,7 +985,7 @@ def main():
                 <li>📁 Chargement automatique depuis <code>{FICHIER_SOURCE}</code></li>
                 <li>📚 Uniquement les enseignements commençant par <b>Cours-</b></li>
                 <li>⏰ <b>Créneaux par défaut intégrés en permanence dans la colonne Horaire</b></li>
-                <li>🎯 Quotas différenciés[cite: 7] : <b>Surv. par Salle (2 permanents)</b> vs <b>Surv. par Amphi (1 vacataire & 2 permanents)</b></li>
+                <li>🎯 Quotas différenciés : <b>Surv. par Salle (2 permanents)</b> vs <b>Surv. par Amphi (1 vacataire & 2 permanents)</b></li>
                 <li>🔀 <b>Gestion du fractionnement des promotions</b> (Sous-groupes / Sections)</li>
                 <li>🛠️ <b>Balayage séquentiel (Round-Robin), anti-succession et prévention des chevauchements</b></li>
             </ul>
