@@ -1416,18 +1416,16 @@ def main():
             if all_ens:
                 ens_selectionne = st.selectbox("Sélectionner un enseignant dans la liste déroulante :", sorted(all_ens), key="select_ens_surv_display")
                 if ens_selectionne:
-                    nb_surv_actuel = 0
-                    if 'surveillance_attribuee' in df_ens.columns:
-                        row_e = df_ens[df_ens['nom'] == ens_selectionne]
-                        if not row_e.empty:
-                            nb_surv_actuel = int(row_e.iloc[0]['surveillance_attribuee'])
-                    
+                    # Récupérer les détails assignés
                     details_assigns = []
                     if st.session_state.surveillance_df is not None:
                         for attr in st.session_state.surveillance_df:
                             survs = [s['nom'] for s in attr.get('details_surveillants', [])]
                             if ens_selectionne in survs or attr.get('enseignant') == ens_selectionne:
                                 details_assigns.append(attr)
+                    
+                    # ✅ CORRECTION 1: Compter correctement = nombre exact de lignes dans le tableau
+                    nb_surv_actuel = len(details_assigns)
                                 
                     col_m1, col_m2 = st.columns(2)
                     with col_m1:
@@ -1437,7 +1435,7 @@ def main():
                         st.metric(label="Qualité / Statut", value=qualite_ens_val)
                         
                     if details_assigns:
-                        st.markdown(f"**Détails des examens / surveillances associés à {ens_selectionne} :**")
+                        st.markdown(f"**Détails des examens / surveillances associés à {ens_selectionne} :** ({nb_surv_actuel} enregistrement(s))")
                         df_details_ens = pd.DataFrame([{
                             'Date': (a['date'].strftime('%d/%m/%Y') if hasattr(a.get('date'), 'strftime') else str(a.get('date'))),
                             'Horaire': a.get('creneau'),
