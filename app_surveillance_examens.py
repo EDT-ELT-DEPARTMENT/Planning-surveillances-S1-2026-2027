@@ -606,18 +606,18 @@ def construire_grille_edt(attributions, creneaux_liste):
         })
     creneaux_utilises = st.session_state.get('creneaux_actifs', CRENEAUX_DEFAUT)
     data = []
-    for creneau in creneaux_utilises:
-        row = {'Creneau': creneau}
-        for jour in jours_ordre:
+    for jour in jours_ordre:
+        row = {'Jour': jour}
+        for creneau in creneaux_utilises:
             exams = grille.get(jour, {}).get(creneau, [])
             if exams:
                 cellules = []
                 for ex in exams:
                     cell_text = f"📖 {ex['matiere']}\n👤 Promotion: {ex['promotion']}\n👤 Chargé: {ex['enseignant']}\n🏫 {ex['lieu']}\n👮\n{ex['surveillants']}"
                     cellules.append(cell_text)
-                row[jour] = "\n---\n".join(cellules)
+                row[creneau] = "\n---\n".join(cellules)
             else:
-                row[jour] = ""
+                row[creneau] = ""
         data.append(row)
     df_grille = pd.DataFrame(data)
     return df_grille, jours_ordre, grille
@@ -688,13 +688,13 @@ def generer_excel_edt(df_grille, promotion):
     return buffer
 
 def generer_html_edt(df_grille, promotion):
-    jours_cols = [c for c in df_grille.columns if c != 'Creneau']
+    creneaux_cols = [c for c in df_grille.columns if c != 'Jour']
     html = f"""
     <style>
         .edt-table {{ border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 11px; text-align: center; }}
         .edt-table th {{ background-color: #1565C0; color: white; padding: 10px; text-align: center; border: 2px solid #0D47A1; font-size: 12px; }}
         .edt-table td {{ padding: 8px; border: 1px solid #90CAF9; vertical-align: middle; text-align: center; min-width: 200px; }}
-        .creneau-cell {{ background-color: #E3F2FD; font-weight: bold; text-align: center; font-size: 12px; width: 120px; }}
+        .jour-cell {{ background-color: #E3F2FD; font-weight: bold; text-align: center; font-size: 12px; width: 120px; }}
         .exam-cell {{ background-color: #FFF8E1; text-align: center; }}
         .matiere {{ font-weight: bold; color: #1565C0; font-size: 12px; text-align: center; }}
         .promo {{ color: #00796B; font-size: 10px; font-weight: bold; text-align: center; }}
@@ -707,14 +707,14 @@ def generer_html_edt(df_grille, promotion):
     <h3 style="color:#333; text-align:center;">Promotion {promotion}</h3>
     <table class="edt-table">
     """
-    html += "<tr><th>Creneau / Horaire</th>"
-    for jour in jours_cols:
-        html += f"<th>{jour.replace(chr(10), '<br>')}</th>"
+    html += "<tr><th>Jour / Date</th>"
+    for creneau in creneaux_cols:
+        html += f"<th>{creneau}</th>"
     html += "</tr>"
     for _, row in df_grille.iterrows():
-        html += f"<tr><td class='creneau-cell'>{row['Creneau']}</td>"
-        for jour in jours_cols:
-            val = row.get(jour, '')
+        html += f"<tr><td class='jour-cell'>{row['Jour']}</td>"
+        for creneau in creneaux_cols:
+            val = row.get(creneau, '')
             if val:
                 parts = val.split('\n---\n')
                 cells_html = []
