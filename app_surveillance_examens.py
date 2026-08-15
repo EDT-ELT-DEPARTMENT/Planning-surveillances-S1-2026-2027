@@ -1686,13 +1686,13 @@ def main():
 
                 df_prof = df[df['Enseignants'] == selected_prof]
                 # DÉDUPLICATION : garder une seule ligne par examen pour l'enseignant
-                df_prof = df_prof.drop_duplicates(subset=['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe'])
+                df_prof = df_prof.drop_duplicates(subset=['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe'])
 
                 prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and 'Email' in df_prof.columns and pd.notna(df_prof['Email'].iloc[0]) and str(df_prof['Email'].iloc[0]).strip() != '' else ""
 
                 st.text(f"E-mail associé : {prof_email if prof_email else 'Aucun e-mail trouvé'}")
                 st.markdown("**Planning de surveillance affecté :**")
-                st.dataframe(df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']], use_container_width=True, hide_index=True)
+                st.dataframe(df_prof[['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']], use_container_width=True, hide_index=True)
 
                 custom_msg = st.text_area("Message personnalisé (optionnel)", "Bonjour,\n\nVeuillez trouver ci-joint votre planning de surveillance pour les examens.\n\nCordialement,", key="email_custom_msg")
 
@@ -1708,7 +1708,7 @@ def main():
                             msg['To'] = prof_email
                             msg['Subject'] = "Plateforme de gestion des EDTs-S2-2026 - Votre planning de surveillance"
 
-                            corps_tableau = df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']].to_html(index=False)
+                            corps_tableau = df_prof[['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']].to_html(index=False)
                             html_content = f"<p>{custom_msg.replace(chr(10), '<br>')}</p>{corps_tableau}"
                             msg.attach(MIMEText(html_content, 'html'))
 
@@ -1744,7 +1744,7 @@ def main():
                             for i, prof in enumerate(enseignants_list):
                                 df_prof = df[df['Enseignants'] == prof]
                                 # DÉDUPLICATION : garder une seule ligne par examen
-                                df_prof = df_prof.drop_duplicates(subset=['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe'])
+                                df_prof = df_prof.drop_duplicates(subset=['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe'])
 
                                 prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and 'Email' in df_prof.columns and pd.notna(df_prof['Email'].iloc[0]) and str(df_prof['Email'].iloc[0]).strip() != '' else ""
 
@@ -1754,7 +1754,7 @@ def main():
                                     msg['To'] = prof_email
                                     msg['Subject'] = "Plateforme de gestion des EDTs-S2-2026 - Votre planning de surveillance"
 
-                                    corps_tableau = df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']].to_html(index=False)
+                                    corps_tableau = df_prof[['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']].to_html(index=False)
                                     html_content = f"<p>Bonjour Pr./Dr. {prof},<br><br>Veuillez trouver ci-dessous votre planning de surveillance extrait de la Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA :</p>{corps_tableau}"
                                     msg.attach(MIMEText(html_content, 'html'))
 
