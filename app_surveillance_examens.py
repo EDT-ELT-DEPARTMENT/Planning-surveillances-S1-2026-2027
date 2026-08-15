@@ -1,8 +1,3 @@
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import streamlit as st
 import pandas as pd
@@ -40,11 +35,6 @@ AMPHIS = [f"A{i:02d}" for i in range(1, 13)]
 CRENEAUX_DEFAUT = ["08h30 - 10h30", "11h00 - 13h00", "13h30 - 15h30"]
 JOURS_FR = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi", "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
 FICHIER_SOURCE = "DATA-ENS-2026-2027_surveillances.xlsx"
-
-def nettoyer_nom_feuille(nom):
-    """Nettoie le nom pour respecter les contraintes Excel (max 31 caractères et pas de caractères spéciaux interdits)."""
-    nom_propre = re.sub(r'[\\/\?\*\[\]:]', '', str(nom))
-    return nom_propre[:31]
 
 def init_session_state():
     defaults = {
@@ -564,7 +554,7 @@ def construire_grille_edt(attributions, creneaux_liste):
 def generer_excel_edt(df_grille, promotion):
     wb = Workbook()
     ws = wb.active
-    ws.title = nettoyer_nom_feuille(f"EDT {promotion}")
+    ws.title = f"EDT {promotion}"
     header_fill = PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid")
     header_font = Font(color="FFFFFF", bold=True, size=11)
     creneau_fill = PatternFill(start_color="E3F2FD", end_color="E3F2FD", fill_type="solid")
@@ -782,7 +772,7 @@ def generer_tableau_html(attributions, creneaux_utilises):
 def generer_excel_colore(attributions):
     wb = Workbook()
     ws = wb.active
-    ws.title = nettoyer_nom_feuille("Planning Global")
+    ws.title = "Planning Global"
     data = []
     for attr in attributions:
         date_val = attr.get('date', None)
@@ -883,85 +873,6 @@ def generer_pdf(attributions):
     doc.build(elements)
     buffer.seek(0)
     return buffer
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
-
-def envoyer_email_edt(destinataire, sujet, corps, fichier_buffer, nom_fichier_piece):
-    """Envoie un e-mail avec l'EDT en pièce jointe via SMTP."""
-    # Récupération des paramètres de configuration depuis st.session_state
-    smtp_server = st.session_state.get('smtp_server', 'smtp.gmail.com')
-    smtp_port = st.session_state.get('smtp_port', 587)
-    smtp_user = st.session_state.get('smtp_user', 'chef.department.elt.fge@gmail.com')
-    smtp_password = st.session_state.get('smtp_password', '')
-
-    # Création du message
-    msg = MIMEMultipart()
-    msg['From'] = smtp_user
-    msg['To'] = destinataire
-    msg['Subject'] = sujet
-
-    # Ajout du corps du message
-    msg.attach(MIMEText(corps, 'plain', 'utf-8'))
-
-    # Gestion de la pièce jointe à partir du buffer (BytesIO)
-    if fichier_buffer is not None and nom_fichier_piece:
-        try:
-            fichier_buffer.seek(0)
-            part = MIMEBase('application', 'octet-stream')
-            part.set_payload(fichier_buffer.read())
-            encoders.encode_base64(part)
-            part.add_header(
-                'Content-Disposition',
-                f'attachment; filename="{nom_fichier_piece}"'
-            )
-            msg.attach(part)
-        except Exception as e:
-            print(f"Erreur lors de l'attachement du fichier : {e}")
-            return False
-
-    # Connexion et envoi via SMTP
-    try:
-        server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()  # Sécurisation de la connexion
-        if smtp_user and smtp_password:
-            server.login(smtp_user, smtp_password)
-        server.sendmail(smtp_user, destinataire, msg.as_string())
-        server.quit()
-        return True
-    except Exception as e:
-        print(f"Erreur lors de l'envoi de l'e-mail : {e}")
-        return False
-
-    if not smtp_user or not smtp_password:
-        return False, "Veuillez configurer vos paramètres SMTP dans la barre latérale."
-
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = smtp_user
-        msg['To'] = destinataire
-        msg['Subject'] = sujet
-
-        msg.attach(MIMEText(corps, 'plain', 'utf-8'))
-
-        if fichier_buffer and nom_fichier_piece:
-            fichier_buffer.seek(0)
-            part = MIMEBase('application', 'octet-stream')
-            part.set_payload(fichier_buffer.read())
-            encoders.encode_base64(part)
-            part.add_header('Content-Disposition', f'attachment; filename="{nom_fichier_piece}"')
-            msg.attach(part)
-
-        server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()
-        server.login(smtp_user, smtp_password)
-        server.sendmail(smtp_user, destinataire, msg.as_string())
-        server.quit()
-        return True, "E-mail envoyé avec succès !"
-    except Exception as e:
-        return False, f"Erreur lors de l'envoi : {str(e)}"
 
 def main():
     init_session_state()
@@ -1059,13 +970,6 @@ def main():
                         st.session_state.jours_feries_list.remove(jf_item)
                         st.session_state.jours_feries = sorted(st.session_state.jours_feries_list)
                         st.rerun()
-
-        st.markdown("---")
-        st.markdown("### 📧 Configuration E-mail (SMTP)")
-        st.session_state['smtp_server'] = st.text_input("Serveur SMTP", value="smtp.gmail.com", key="w_smtp_srv")
-        st.session_state['smtp_port'] = st.number_input("Port SMTP", value=587, key="w_smtp_port")
-        st.session_state['smtp_user'] = st.text_input("Adresse e-mail expéditeur", value="", key="w_smtp_user")
-        st.session_state['smtp_password'] = st.text_input("Mot de passe / Token d'application", type="password", value="", key="w_smtp_pwd")
 
         st.markdown("---")
         st.info("💡 Vendredi et Samedi exclus. Dimanche est travaillable.")
@@ -1437,7 +1341,7 @@ def main():
     with tabs[4]:
         st.markdown('<div class="sub-header">📅 EDT Chronologique en Grille par Promotion</div>', unsafe_allow_html=True)
         if st.session_state.surveillance_df is not None:
-            promo_sel_choisie = st.selectbox("🎯 Choisir la promotion à afficher, télécharger et envoyer :", st.session_state.promotions_list, key="select_promo_unique_edt")
+            promo_sel_choisie = st.selectbox("🎯 Choisir la promotion à afficher et télécharger :", st.session_state.promotions_list, key="select_promo_unique_edt")
             if promo_sel_choisie:
                 st.markdown(f"#### 🎓 Promotion: **{promo_sel_choisie}**")
                 attr_promo = [a for a in st.session_state.surveillance_df if str(a.get('promotion', '')).strip() == str(promo_sel_choisie).strip()]
@@ -1449,31 +1353,6 @@ def main():
                         with c1: st.download_button(f"⬇️ HTML - {promo_sel_choisie}", generer_html_edt(df_grille, promo_sel_choisie), f"EDT_{promo_sel_choisie}.html", "text/html", key=f"dl_html_{promo_sel_choisie}")
                         with c2: st.download_button(f"⬇️ Excel - {promo_sel_choisie}", generer_excel_edt(df_grille, promo_sel_choisie), f"EDT_{promo_sel_choisie}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_xlsx_{promo_sel_choisie}")
                         with c3: st.download_button(f"⬇️ PDF - {promo_sel_choisie}", generer_pdf_edt(attr_promo, promo_sel_choisie, st.session_state.creneaux_actifs), f"EDT_{promo_sel_choisie}.pdf", "application/pdf", key=f"dl_pdf_{promo_sel_choisie}")
-                        
-                        st.markdown("---")
-                        st.markdown("#### 📤 Envoyer l'EDT par E-mail")
-                        with st.form(key=f"form_email_{promo_sel_choisie}"):
-                            email_destinataire = st.text_input("Adresse e-mail du destinataire (Représentant de promotion / Enseignant)")
-                            sujet_email = st.text_input("Sujet", value=f"[{TITRE_PLATEFORME}] Emploi du temps - Promotion {promo_sel_choisie}")
-                            corps_email = st.text_area("Message", value=f"Bonjour,\n\nVeuillez trouver ci-joint l'emploi du temps des examens pour la promotion {promo_sel_choisie}.\n\nCordialement,\nDépartement d'Électrotechnique")
-                            
-                            submit_email = st.form_submit_button("📨 Envoyer par E-mail")
-                            if submit_email:
-                                if not email_destinataire:
-                                    st.error("Veuillez saisir une adresse e-mail valide.")
-                                else:
-                                    pdf_buffer = generer_pdf_edt(attr_promo, promo_sel_choisie, st.session_state.creneaux_actifs)
-                                    succes, message = envoyer_email_edt(
-                                        email_destinataire, 
-                                        sujet_email, 
-                                        corps_email, 
-                                        pdf_buffer, 
-                                        f"EDT_{promo_sel_choisie}.pdf"
-                                    )
-                                    if succes:
-                                        st.success(f"✅ {message}")
-                                    else:
-                                        st.error(f"❌ {message}")
                 else:
                     st.info(f"Aucune attribution trouvée pour la promotion {promo_sel_choisie}.")
         else: st.warning("⚠️ Veuillez d'abord générer les attributions.")
@@ -1515,7 +1394,7 @@ def main():
                             with b_ind1:
                                 st.download_button(f"HTML - {promo}", generer_html_edt(df_g, promo), f"EDT_{promo}.html", "text/html", key=f"rep_html_{promo}")
                             with b_ind2:
-                                st.download_button(f"Excel - {promo}", generer_excel_edt(df_g, promo), f"EDT_{promo}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"rep_xlsx_{promo}")
+                                st.download_button(f"Excel - {promo}", generer_excel_edt(df_g, promo), f"EDT_{promo}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.spreadsheet", key=f"rep_xlsx_{promo}")
                             with b_ind3:
                                 st.download_button(f"PDF - {promo}", generer_pdf_edt(attr_promo, promo, st.session_state.creneaux_actifs), f"EDT_{promo}.pdf", "application/pdf", key=f"rep_pdf_{promo}")
                 else:
