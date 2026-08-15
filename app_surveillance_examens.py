@@ -606,18 +606,18 @@ def construire_grille_edt(attributions, creneaux_liste):
         })
     creneaux_utilises = st.session_state.get('creneaux_actifs', CRENEAUX_DEFAUT)
     data = []
-    for creneau in creneaux_utilises:
-        row = {'Creneau': creneau}
-        for jour in jours_ordre:
+    for jour in jours_ordre:
+        row = {'Jour': jour}
+        for creneau in creneaux_utilises:
             exams = grille.get(jour, {}).get(creneau, [])
             if exams:
                 cellules = []
                 for ex in exams:
                     cell_text = f"📖 {ex['matiere']}\n👤 Promotion: {ex['promotion']}\n👤 Chargé: {ex['enseignant']}\n🏫 {ex['lieu']}\n👮\n{ex['surveillants']}"
                     cellules.append(cell_text)
-                row[jour] = "\n---\n".join(cellules)
+                row[creneau] = "\n---\n".join(cellules)
             else:
-                row[jour] = ""
+                row[creneau] = ""
         data.append(row)
     df_grille = pd.DataFrame(data)
     return df_grille, jours_ordre, grille
@@ -688,13 +688,13 @@ def generer_excel_edt(df_grille, promotion):
     return buffer
 
 def generer_html_edt(df_grille, promotion):
-    jours_cols = [c for c in df_grille.columns if c != 'Creneau']
+    creneaux_cols = [c for c in df_grille.columns if c != 'Jour']
     html = f"""
     <style>
         .edt-table {{ border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 11px; text-align: center; }}
         .edt-table th {{ background-color: #1565C0; color: white; padding: 10px; text-align: center; border: 2px solid #0D47A1; font-size: 12px; }}
         .edt-table td {{ padding: 8px; border: 1px solid #90CAF9; vertical-align: middle; text-align: center; min-width: 200px; }}
-        .creneau-cell {{ background-color: #E3F2FD; font-weight: bold; text-align: center; font-size: 12px; width: 120px; }}
+        .jour-cell {{ background-color: #E3F2FD; font-weight: bold; text-align: center; font-size: 12px; width: 120px; }}
         .exam-cell {{ background-color: #FFF8E1; text-align: center; }}
         .matiere {{ font-weight: bold; color: #1565C0; font-size: 12px; text-align: center; }}
         .promo {{ color: #00796B; font-size: 10px; font-weight: bold; text-align: center; }}
@@ -707,14 +707,14 @@ def generer_html_edt(df_grille, promotion):
     <h3 style="color:#333; text-align:center;">Promotion {promotion}</h3>
     <table class="edt-table">
     """
-    html += "<tr><th>Creneau / Horaire</th>"
-    for jour in jours_cols:
-        html += f"<th>{jour.replace(chr(10), '<br>')}</th>"
+    html += "<tr><th>Jour / Date</th>"
+    for creneau in creneaux_cols:
+        html += f"<th>{creneau}</th>"
     html += "</tr>"
     for _, row in df_grille.iterrows():
-        html += f"<tr><td class='creneau-cell'>{row['Creneau']}</td>"
-        for jour in jours_cols:
-            val = row.get(jour, '')
+        html += f"<tr><td class='jour-cell'>{row['Jour']}</td>"
+        for creneau in creneaux_cols:
+            val = row.get(creneau, '')
             if val:
                 parts = val.split('\n---\n')
                 cells_html = []
@@ -759,20 +759,20 @@ def generer_pdf_edt(attributions, promotion, creneaux_liste):
         buffer.seek(0)
         return buffer
         
-    jours_cols = [c for c in df_grille.columns if c != 'Creneau']
+    creneaux_cols = [c for c in df_grille.columns if c != 'Jour']
     
     header_style = ParagraphStyle('TableHeader', parent=styles['Normal'], fontSize=8, leading=10, textColor=colors.whitesmoke, alignment=1, fontName='Helvetica-Bold')
-    creneau_header_style = ParagraphStyle('CreneauHeader', parent=header_style, fontSize=8, leading=10)
+    jour_header_style = ParagraphStyle('JourHeader', parent=header_style, fontSize=8, leading=10)
     
-    table_data = [[Paragraph('Creneau / Horaire', creneau_header_style)] + [Paragraph(j.replace('\n', '<br/>'), header_style) for j in jours_cols]]
+    table_data = [[Paragraph('Jour / Date', creneau_header_style)] + [Paragraph(c, header_style) for c in creneaux_cols]]
     
     cell_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontSize=7, leading=9, alignment=1, textColor=colors.HexColor('#333333'))
-    creneau_cell_style = ParagraphStyle('CreneauCell', parent=cell_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#1565C0'))
+    jour_cell_style = ParagraphStyle('JourCell', parent=cell_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#1565C0'))
     
     for _, row in df_grille.iterrows():
-        row_data = [Paragraph(str(row['Creneau']), creneau_cell_style)]
-        for jour in jours_cols:
-            val = row.get(jour, '')
+        row_data = [Paragraph(str(row['Jour']).replace('\n', '<br/>'), jour_cell_style)]
+        for creneau in creneaux_cols:
+            val = row.get(creneau, '')
             if val:
                 parts = val.split('\n---\n')
                 formatted_parts = []
@@ -802,7 +802,7 @@ def generer_pdf_edt(attributions, promotion, creneaux_liste):
         table_data.append(row_data)
         
     available_width = 27.7 * cm
-    col_widths = [3 * cm] + [(available_width - 3 * cm) / len(jours_cols)] * len(jours_cols)
+    col_widths = [3.5 * cm] + [(available_width - 3.5 * cm) / len(creneaux_cols)] * len(creneaux_cols)
     
     table = Table(table_data, repeatRows=1, colWidths=col_widths)
     table.setStyle(TableStyle([
@@ -1225,17 +1225,17 @@ def generer_pdf_toutes_promotions():
         elements.append(Paragraph(f"Promotion {promo}", subtitle_style))
         elements.append(Spacer(1, 0.2*cm))
 
-        jours_cols = [c for c in df_grille.columns if c != 'Creneau']
+        creneaux_cols = [c for c in df_grille.columns if c != 'Jour']
         header_style = ParagraphStyle('TableHeader', parent=styles['Normal'], fontSize=8, leading=10, textColor=colors.whitesmoke, alignment=1, fontName='Helvetica-Bold')
         creneau_header_style = ParagraphStyle('CreneauHeader', parent=header_style, fontSize=8, leading=10)
-        table_data = [[Paragraph('Creneau / Horaire', creneau_header_style)] + [Paragraph(j.replace('\n', '<br/>'), header_style) for j in jours_cols]]
+        table_data = [[Paragraph('Jour / Date', creneau_header_style)] + [Paragraph(c, header_style) for c in creneaux_cols]]
         cell_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontSize=7, leading=9, alignment=1, textColor=colors.HexColor('#333333'))
         creneau_cell_style = ParagraphStyle('CreneauCell', parent=cell_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#1565C0'))
 
         for _, row in df_grille.iterrows():
             row_data = [Paragraph(str(row['Creneau']), creneau_cell_style)]
-            for jour in jours_cols:
-                val = row.get(jour, '')
+            for creneau in creneaux_cols:
+                val = row.get(creneau, '')
                 if val:
                     parts = val.split('\n---\n')
                     formatted_parts = []
@@ -1258,7 +1258,7 @@ def generer_pdf_toutes_promotions():
             table_data.append(row_data)
 
         available_width = 27.7 * cm
-        col_widths = [3 * cm] + [(available_width - 3 * cm) / len(jours_cols)] * len(jours_cols)
+        col_widths = [3.5 * cm] + [(available_width - 3.5 * cm) / len(creneaux_cols)] * len(creneaux_cols)
         table = Table(table_data, repeatRows=1, colWidths=col_widths)
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565C0')),
@@ -1913,7 +1913,7 @@ def main():
     with tabs[7]:
         st.markdown('<div class="sub-header">📤 Envoyer l''EDT par E-mail (Surveillance)</div>', unsafe_allow_html=True)
 
-        # Paramètres SMTP hardcodés (non modifiables via l'interface)
+        # Paramètres SMTP hardcodés
         smtp_server = SMTP_SERVER
         smtp_port = SMTP_PORT
         sender_email = SMTP_USER
@@ -1930,152 +1930,174 @@ def main():
         else:
             st.success(f"✅ {len(st.session_state.surveillance_df)} attributions de surveillance disponibles.")
 
-            # Conversion des attributions en DataFrame exploitable
-            rows = []
-            for attr in st.session_state.surveillance_df:
-                date_val = attr.get('date')
-                date_str = ''
-                jour = ''
-                if hasattr(date_val, 'strftime'):
-                    date_str = date_val.strftime('%d/%m/%Y')
-                    jour = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
-                noms_uniques = []
-                for s in attr.get('details_surveillants', []):
-                    if s['nom'] not in noms_uniques:
-                        noms_uniques.append(s['nom'])
-                        rows.append({
-                            'Enseignements': attr.get('matiere', ''),
-                            'Enseignants': s['nom'],
-                            'Horaire': attr.get('creneau', ''),
-                            'Jours': jour,
-                            'Lieu': attr.get('lieu', ''),
-                            'Promotion': attr.get('promotion', ''),
-                            'Groupe': attr.get('groupe', 'Global'),
-                            'Date': date_str,
-                            'Email': ''
-                        })
-            df_attributions = pd.DataFrame(rows)
+            # --- SÉLECTION DE LA PROMOTION ---
+            st.markdown("### 🎓 Sélectionner une promotion")
+            promo_email = st.selectbox(
+                "Choisir la promotion pour l'envoi d'e-mails",
+                st.session_state.promotions_list,
+                key="email_promo_select"
+            )
 
-            st.markdown("**📋 Aperçu des surveillances extraites des attributions :**")
-            st.dataframe(df_attributions[['Enseignements', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']], use_container_width=True, hide_index=True)
+            # Filtrer les attributions pour cette promotion
+            attr_promo_filtre = [
+                a for a in st.session_state.surveillance_df
+                if str(a.get('promotion', '')).strip() == str(promo_email).strip()
+            ]
 
-            st.markdown("---")
-            st.markdown("### 📧 Import du mapping Enseignant → Email")
-            st.info("Importez un fichier Excel/CSV contenant les colonnes **'Enseignants'** et **'Email'** pour associer les adresses e-mails aux surveillants.")
-
-            uploaded_mapping = st.file_uploader("Fichier de mapping Enseignant → Email (Excel/CSV)", type=["xlsx", "csv"], key="email_mapping")
-
-            df = df_attributions.copy()
-            if uploaded_mapping is not None:
-                if uploaded_mapping.name.endswith('.csv'):
-                    df_map = pd.read_csv(uploaded_mapping)
-                else:
-                    df_map = pd.read_excel(uploaded_mapping)
-                if 'Enseignants' not in df_map.columns or 'Email' not in df_map.columns:
-                    st.error("❌ Le fichier de mapping doit contenir obligatoirement les colonnes 'Enseignants' et 'Email'.")
-                else:
-                    df = df_attributions.merge(df_map[['Enseignants', 'Email']], on='Enseignants', how='left', suffixes=('', '_map'))
-                    if 'Email_map' in df.columns:
-                        df['Email'] = df['Email_map']
-                        df = df.drop(columns=['Email_map'])
-                    st.success("✅ Mapping email fusionné avec les attributions !")
+            if not attr_promo_filtre:
+                st.warning(f"⚠️ Aucune surveillance trouvée pour la promotion **{promo_email}**.")
             else:
-                st.info("💡 Aucun fichier de mapping importé. Les e-mails sont vides. Uploadez un fichier de mapping pour activer l'envoi.")
+                st.success(f"📊 {len(attr_promo_filtre)} séance(s) de surveillance trouvée(s) pour **{promo_email}**.")
 
-            nb_avec_email = df['Email'].replace('', pd.NA).notna().sum() if 'Email' in df.columns else 0
-            st.info(f"📊 {nb_avec_email} / {len(df)} lignes ont une adresse e-mail associée.")
+                # Conversion des attributions filtrées en DataFrame
+                rows = []
+                for attr in attr_promo_filtre:
+                    date_val = attr.get('date')
+                    date_str = ''
+                    jour = ''
+                    if hasattr(date_val, 'strftime'):
+                        date_str = date_val.strftime('%d/%m/%Y')
+                        jour = JOURS_FR.get(date_val.strftime('%A'), date_val.strftime('%A'))
+                    noms_uniques = []
+                    for s in attr.get('details_surveillants', []):
+                        if s['nom'] not in noms_uniques:
+                            noms_uniques.append(s['nom'])
+                            rows.append({
+                                'Enseignements': attr.get('matiere', ''),
+                                'Enseignants': s['nom'],
+                                'Horaire': attr.get('creneau', ''),
+                                'Jours': jour,
+                                'Lieu': attr.get('lieu', ''),
+                                'Promotion': attr.get('promotion', ''),
+                                'Groupe': attr.get('groupe', 'Global'),
+                                'Date': date_str,
+                                'Email': ''
+                            })
+                df_attributions = pd.DataFrame(rows)
 
-            enseignants_list = df['Enseignants'].dropna().unique()
+                st.markdown("**📋 Aperçu des surveillances pour cette promotion :**")
+                st.dataframe(df_attributions[['Enseignements', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Groupe']], use_container_width=True, hide_index=True)
 
-            tab_indiv, tab_groupe = st.tabs(["👤 Envoi Individuel", "👥 Envoi par Groupe (Masse)"])
+                st.markdown("---")
+                st.markdown("### 📧 Import du mapping Enseignant → Email")
+                st.info("Importez un fichier Excel/CSV contenant les colonnes **'Enseignants'** et **'Email'** pour associer les adresses e-mails aux surveillants de cette promotion.")
 
-            # --- 1. ENVOI INDIVIDUEL ---
-            with tab_indiv:
-                st.subheader("Gestion et Envoi Individuel")
-                selected_prof = st.selectbox("Sélectionner un surveillant", enseignants_list, key="email_select_prof")
+                uploaded_mapping = st.file_uploader("Fichier de mapping Enseignant → Email (Excel/CSV)", type=["xlsx", "csv"], key="email_mapping")
 
-                df_prof = df[df['Enseignants'] == selected_prof]
-                df_prof = df_prof.drop_duplicates(subset=['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe'])
-
-                prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and 'Email' in df_prof.columns and pd.notna(df_prof['Email'].iloc[0]) and str(df_prof['Email'].iloc[0]).strip() != '' else ""
-
-                st.text(f"E-mail associé : {prof_email if prof_email else 'Aucun e-mail trouvé'}")
-                st.markdown("**Planning de surveillance affecté :**")
-                st.dataframe(df_prof[['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']], use_container_width=True, hide_index=True)
-
-                custom_msg = st.text_area("Message personnalisé (optionnel)", "Bonjour,\n\nVeuillez trouver ci-joint votre planning de surveillance pour les examens.\n\nCordialement,", key="email_custom_msg")
-
-                if st.button("Envoyer l'EDT à cet enseignant", key="email_btn_indiv"):
-                    if not prof_email:
-                        st.error("Impossible d'envoyer : l'adresse e-mail est manquante pour cet enseignant. Importez un fichier de mapping avec la colonne 'Email'.")
-                    elif not sender_email or not sender_password:
-                        st.error("Les paramètres SMTP ne sont pas configurés.")
+                df = df_attributions.copy()
+                if uploaded_mapping is not None:
+                    if uploaded_mapping.name.endswith('.csv'):
+                        df_map = pd.read_csv(uploaded_mapping)
                     else:
-                        try:
-                            msg = MIMEMultipart()
-                            msg['From'] = sender_email
-                            msg['To'] = prof_email
-                            msg['Subject'] = "Plateforme de gestion des EDTs-S2-2026 - Votre planning de surveillance"
-
-                            corps_tableau = df_prof[['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']].to_html(index=False)
-                            html_content = f"<p>{custom_msg.replace(chr(10), '<br>')}</p>{corps_tableau}"
-                            msg.attach(MIMEText(html_content, 'html'))
-
-                            server = smtplib.SMTP(smtp_server, smtp_port)
-                            server.starttls()
-                            server.login(sender_email, sender_password)
-                            server.sendmail(sender_email, prof_email, msg.as_string())
-                            server.quit()
-
-                            st.success(f"E-mail envoyé avec succès à {selected_prof} ({prof_email}) !")
-                        except Exception as e:
-                            st.error(f"Erreur lors de l'envoi : {e}")
-
-            # --- 2. ENVOI PAR GROUPE ---
-            with tab_groupe:
-                st.subheader("Envoi Groupé à tous les surveillants")
-                st.info("Cette action va envoyer un e-mail à chaque surveillant listé dans les attributions, avec son planning personnel.")
-
-                if st.button("Lancer l'envoi groupé", key="email_btn_group"):
-                    if not sender_email or not sender_password:
-                        st.error("Les paramètres SMTP ne sont pas configurés.")
+                        df_map = pd.read_excel(uploaded_mapping)
+                    if 'Enseignants' not in df_map.columns or 'Email' not in df_map.columns:
+                        st.error("❌ Le fichier de mapping doit contenir obligatoirement les colonnes 'Enseignants' et 'Email'.")
                     else:
-                        try:
-                            server = smtplib.SMTP(smtp_server, smtp_port)
-                            server.starttls()
-                            server.login(sender_email, sender_password)
+                        df = df_attributions.merge(df_map[['Enseignants', 'Email']], on='Enseignants', how='left', suffixes=('', '_map'))
+                        if 'Email_map' in df.columns:
+                            df['Email'] = df['Email_map']
+                            df = df.drop(columns=['Email_map'])
+                        st.success("✅ Mapping email fusionné avec les attributions !")
+                else:
+                    st.info("💡 Aucun fichier de mapping importé. Les e-mails sont vides. Uploadez un fichier de mapping pour activer l'envoi.")
 
-                            barre_progression = st.progress(0)
-                            total = len(enseignants_list)
-                            envoyes = 0
-                            echecs = 0
+                nb_avec_email = df['Email'].replace('', pd.NA).notna().sum() if 'Email' in df.columns else 0
+                st.info(f"📊 {nb_avec_email} / {len(df)} lignes ont une adresse e-mail associée.")
 
-                            for i, prof in enumerate(enseignants_list):
-                                df_prof = df[df['Enseignants'] == prof]
-                                df_prof = df_prof.drop_duplicates(subset=['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe'])
+                enseignants_list = df['Enseignants'].dropna().unique()
 
-                                prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and 'Email' in df_prof.columns and pd.notna(df_prof['Email'].iloc[0]) and str(df_prof['Email'].iloc[0]).strip() != '' else ""
+                if len(enseignants_list) == 0:
+                    st.warning("⚠️ Aucun enseignant trouvé pour cette promotion.")
+                else:
+                    tab_indiv, tab_groupe = st.tabs(["👤 Envoi Individuel", "👥 Envoi par Groupe (Masse)"])
 
-                                if prof_email:
+                    # --- 1. ENVOI INDIVIDUEL ---
+                    with tab_indiv:
+                        st.subheader("Gestion et Envoi Individuel")
+                        selected_prof = st.selectbox("Sélectionner un surveillant", enseignants_list, key="email_select_prof")
+
+                        df_prof = df[df['Enseignants'] == selected_prof]
+                        df_prof = df_prof.drop_duplicates(subset=['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe'])
+
+                        prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and 'Email' in df_prof.columns and pd.notna(df_prof['Email'].iloc[0]) and str(df_prof['Email'].iloc[0]).strip() != '' else ""
+
+                        st.text(f"E-mail associé : {prof_email if prof_email else 'Aucun e-mail trouvé'}")
+                        st.markdown("**Planning de surveillance affecté :**")
+                        st.dataframe(df_prof[['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Groupe']], use_container_width=True, hide_index=True)
+
+                        custom_msg = st.text_area("Message personnalisé (optionnel)", f"Bonjour,\n\nVeuillez trouver ci-joint votre planning de surveillance pour la promotion {promo_email}.\n\nCordialement,", key="email_custom_msg")
+
+                        if st.button("Envoyer l'EDT à cet enseignant", key="email_btn_indiv"):
+                            if not prof_email:
+                                st.error("Impossible d'envoyer : l'adresse e-mail est manquante pour cet enseignant. Importez un fichier de mapping avec la colonne 'Email'.")
+                            elif not sender_email or not sender_password:
+                                st.error("Les paramètres SMTP ne sont pas configurés.")
+                            else:
+                                try:
                                     msg = MIMEMultipart()
                                     msg['From'] = sender_email
                                     msg['To'] = prof_email
-                                    msg['Subject'] = "Plateforme de gestion des EDTs-S2-2026 - Votre planning de surveillance"
+                                    msg['Subject'] = f"Plateforme de gestion des EDTs-S2-2026 - Planning de surveillance - {promo_email}"
 
-                                    corps_tableau = df_prof[['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']].to_html(index=False)
-                                    html_content = f"<p>Bonjour Pr./Dr. {prof},<br><br>Veuillez trouver ci-dessous votre planning de surveillance extrait de la Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA :</p>{corps_tableau}"
+                                    corps_tableau = df_prof[['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Groupe']].to_html(index=False)
+                                    html_content = f"<p>{custom_msg.replace(chr(10), '<br>')}</p>{corps_tableau}"
                                     msg.attach(MIMEText(html_content, 'html'))
 
+                                    server = smtplib.SMTP(smtp_server, smtp_port)
+                                    server.starttls()
+                                    server.login(sender_email, sender_password)
                                     server.sendmail(sender_email, prof_email, msg.as_string())
-                                    envoyes += 1
-                                else:
-                                    echecs += 1
+                                    server.quit()
 
-                                barre_progression.progress((i + 1) / total)
+                                    st.success(f"E-mail envoyé avec succès à {selected_prof} ({prof_email}) !")
+                                except Exception as e:
+                                    st.error(f"Erreur lors de l'envoi : {e}")
 
-                            server.quit()
-                            st.success(f"✅ Envoi groupé terminé : {envoyes} e-mail(s) envoyé(s), {echecs} sans adresse e-mail.")
-                        except Exception as e:
-                            st.error(f"Erreur lors de l'envoi groupé : {e}")
+                    # --- 2. ENVOI PAR GROUPE ---
+                    with tab_groupe:
+                        st.subheader(f"Envoi Groupé — Promotion {promo_email}")
+                        st.info(f"Cette action va envoyer un e-mail à chaque surveillant de la promotion **{promo_email}**, avec son planning personnel.")
+
+                        if st.button("Lancer l'envoi groupé", key="email_btn_group"):
+                            if not sender_email or not sender_password:
+                                st.error("Les paramètres SMTP ne sont pas configurés.")
+                            else:
+                                try:
+                                    server = smtplib.SMTP(smtp_server, smtp_port)
+                                    server.starttls()
+                                    server.login(sender_email, sender_password)
+
+                                    barre_progression = st.progress(0)
+                                    total = len(enseignants_list)
+                                    envoyes = 0
+                                    echecs = 0
+
+                                    for i, prof in enumerate(enseignants_list):
+                                        df_prof = df[df['Enseignants'] == prof]
+                                        df_prof = df_prof.drop_duplicates(subset=['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe'])
+
+                                        prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and 'Email' in df_prof.columns and pd.notna(df_prof['Email'].iloc[0]) and str(df_prof['Email'].iloc[0]).strip() != '' else ""
+
+                                        if prof_email:
+                                            msg = MIMEMultipart()
+                                            msg['From'] = sender_email
+                                            msg['To'] = prof_email
+                                            msg['Subject'] = f"Plateforme de gestion des EDTs-S2-2026 - Planning de surveillance - {promo_email}"
+
+                                            corps_tableau = df_prof[['Enseignements', 'Horaire', 'Jours', 'Lieu', 'Groupe']].to_html(index=False)
+                                            html_content = f"<p>Bonjour Pr./Dr. {prof},<br><br>Veuillez trouver ci-dessous votre planning de surveillance pour la promotion {promo_email}, extrait de la Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA :</p>{corps_tableau}"
+                                            msg.attach(MIMEText(html_content, 'html'))
+
+                                            server.sendmail(sender_email, prof_email, msg.as_string())
+                                            envoyes += 1
+                                        else:
+                                            echecs += 1
+
+                                        barre_progression.progress((i + 1) / total)
+
+                                    server.quit()
+                                    st.success(f"✅ Envoi groupé terminé pour **{promo_email}** : {envoyes} e-mail(s) envoyé(s), {echecs} sans adresse e-mail.")
+                                except Exception as e:
+                                    st.error(f"Erreur lors de l'envoi groupé : {e}")
 if __name__ == "__main__":
     main()
