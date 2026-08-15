@@ -133,7 +133,13 @@ def compter_enseignants_quota_atteint(enseignants_df, quotas):
         quota = quotas.get(qualite, 6)
         ens_qualite = enseignants_df[enseignants_df['qualite'] == qualite]
         nb_total = len(ens_qualite)
-        nb_quota_atteint = len(ens_qualite[ens_qualite.get('surveillance_attribuee', 0) >= quota])
+        
+        # ✅ CORRECTION: Vérifier que la colonne existe avant d'y accéder
+        if 'surveillance_attribuee' in ens_qualite.columns:
+            nb_quota_atteint = len(ens_qualite[ens_qualite['surveillance_attribuee'] >= quota])
+        else:
+            nb_quota_atteint = 0
+        
         comptage[qualite] = {
             'total': nb_total,
             'quota_atteint': nb_quota_atteint,
