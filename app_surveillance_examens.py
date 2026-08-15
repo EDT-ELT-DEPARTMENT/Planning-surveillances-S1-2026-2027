@@ -1759,94 +1759,97 @@ def main():
         else: st.warning("Générez d'abord le planning.")
 
     with tabs[4]:
-        st.markdown('<div class="sub-header">📅 EDT Chronologique en Grille par Promotion</div>', unsafe_allow_html=True)
-        if st.session_state.surveillance_df is not None:
-            promo_sel_choisie = st.selectbox("🎯 Choisir la promotion à afficher, télécharger et envoyer :", st.session_state.promotions_list, key="select_promo_unique_edt")
-            if promo_sel_choisie:
-                st.markdown(f"#### 🎓 Promotion: **{promo_sel_choisie}**")
-                attr_promo = [a for a in st.session_state.surveillance_df if str(a.get('promotion', '')).strip() == str(promo_sel_choisie).strip()]
-                if attr_promo:
-                    df_grille, _, _ = construire_grille_edt(attr_promo, st.session_state.creneaux_actifs)
-                    if df_grille is not None and not df_grille.empty:
-                        st.dataframe(df_grille, use_container_width=True, hide_index=True)
-                        c1, c2, c3 = st.columns(3)
-                        with c1: st.download_button(f"⬇️ HTML - {promo_sel_choisie}", generer_html_edt(df_grille, promo_sel_choisie), f"EDT_{promo_sel_choisie}.html", "text/html", key=f"dl_html_{promo_sel_choisie}")
-                        with c2: st.download_button(f"⬇️ Excel - {promo_sel_choisie}", generer_excel_edt(df_grille, promo_sel_choisie), f"EDT_{promo_sel_choisie}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_xlsx_{promo_sel_choisie}")
-                        with c3: st.download_button(f"⬇️ PDF - {promo_sel_choisie}", generer_pdf_edt(attr_promo, promo_sel_choisie, st.session_state.creneaux_actifs), f"EDT_{promo_sel_choisie}.pdf", "application/pdf", key=f"dl_pdf_{promo_sel_choisie}")
-                        
-                        st.markdown("---")
-                        st.markdown("#### 📤 Envoyer l'EDT par E-mail")
-                        with st.form(key=f"form_email_{promo_sel_choisie}"):
-                            email_destinataire = st.text_input("Adresse e-mail du destinataire (Représentant de promotion / Enseignant)")
-                            sujet_email = st.text_input("Sujet", value=f"[{TITRE_PLATEFORME}] Emploi du temps - Promotion {promo_sel_choisie}")
-                            corps_email = st.text_area("Message", value=f"Bonjour,\n\nVeuillez trouver ci-joint l'emploi du temps des examens pour la promotion {promo_sel_choisie}.\n\nCordialement,\nDépartement d'Électrotechnique")
-                            
-                            submit_email = st.form_submit_button("📨 Envoyer par E-mail")
-                            if submit_email:
-                                if not email_destinataire:
-                                    st.error("Veuillez saisir une adresse e-mail valide.")
-                                else:
-                                    pdf_buffer = generer_pdf_edt(attr_promo, promo_sel_choisie, st.session_state.creneaux_actifs)
-                                    succes, message = envoyer_email_edt(
-                                        email_destinataire, 
-                                        sujet_email, 
-                                        corps_email, 
-                                        pdf_buffer, 
-                                        f"EDT_{promo_sel_choisie}.pdf"
-                                    )
-                                    if succes:
-                                        st.success(f"✅ {message}")
-                                    else:
-                                        st.error(f"❌ {message}")
-                else:
-                    st.info(f"Aucune attribution trouvée pour la promotion {promo_sel_choisie}.")
-        else: st.warning("⚠️ Veuillez d'abord générer les attributions.")
-
-    with tabs[5]:
-        st.markdown('<div class="sub-header">📂 Répertoire des EDTs & Téléchargements (Individuel & Groupé)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">📅 EDT Chronologique en Grille</div>', unsafe_allow_html=True)
+    
+    if st.session_state.historique_edt:
+        st.markdown("### 📦 Téléchargement Groupé")
+        cg1, cg2, cg3, cg4 = st.columns(4)
+        with cg1:
+            zip_all = creer_zip_edt()
+            st.download_button("⬇️ ZIP Tous les EDT", zip_all, "EDTs_Toutes_Promotions.zip", "application/zip", key="dl_zip_all")
+        with cg2:
+            zip_html = creer_zip_edt("html")
+            st.download_button("⬇️ ZIP HTML", zip_html, "EDTs_HTML.zip", "application/zip", key="dl_zip_html")
+        with cg3:
+            zip_xlsx = creer_zip_edt("xlsx")
+            st.download_button("⬇️ ZIP Excel", zip_xlsx, "EDTs_Excel.zip", "application/zip", key="dl_zip_xlsx")
+        with cg4:
+            zip_pdf = creer_zip_edt("pdf")
+            st.download_button("⬇️ ZIP PDF", zip_pdf, "EDTs_PDF.zip", "application/zip", key="dl_zip_pdf")
+        st.markdown("---")
+    
+    if st.session_state.surveillance_df is not None:
+        promo_sel = st.selectbox("🎓 Promotion", st.session_state.promotions_list, key="sel_promo_edt")
+        attr_promo = [a for a in st.session_state.surveillance_df if str(a.get('promotion', '')).strip() == str(promo_sel).strip()]
         
-        nb_generes = len(st.session_state.historique_edt) if 'historique_edt' in st.session_state else 0
-        total_promos_attendu = len(st.session_state.promotions_list) if st.session_state.promotions_list else 23
-        
-        st.markdown(f"""
-        <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 20px;">
-            <h3 style="color: #1565c0; margin: 0;">Afficheur Numérique des EDTs</h3>
-            <p style="font-size: 1.5rem; font-weight: bold; color: #0d47a1; margin: 5px 0;">
-                {nb_generes} / {total_promos_attendu} EDTs générés
-            </p>
-            <p style="font-size: 0.9rem; color: #555; margin: 0;">Nombre d'emplois du temps enregistrés dans le répertoire sur le total de vos promotions.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if st.session_state.surveillance_df is not None and st.session_state.promotions_list:
-            st.markdown("### 📥 Téléchargement Groupé de tous les EDTs")
-            col_g1, col_g2 = st.columns(2)
-            with col_g1:
-                st.download_button("⬇️ Télécharger le Planning Global Excel", generer_excel_colore(st.session_state.surveillance_df), "Planning_Global_Toutes_Promotions.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.spreadsheet", key="btn_group_excel")
-            with col_g2:
-                st.download_button("⬇️ Télécharger le Planning Global PDF", generer_pdf(st.session_state.surveillance_df), "Planning_Global_Toutes_Promotions.pdf", "application/pdf", key="btn_group_pdf")
+        if attr_promo:
+            df_grille, _, _ = construire_grille_edt(attr_promo, CRENEAUX)
+            if df_grille is not None:
+                st.dataframe(df_grille, use_container_width=True, hide_index=True)
                 
-            st.markdown("---")
-            st.markdown("### 📑 Répertoire Individuel par Promotion")
-            for promo in st.session_state.promotions_list:
-                attr_promo = [a for a in st.session_state.surveillance_df if str(a.get('promotion', '')).strip() == str(promo).strip()]
-                if attr_promo:
-                    df_g, _, _ = construire_grille_edt(attr_promo, st.session_state.creneaux_actifs)
-                    if df_g is not None and not df_g.empty:
-                        with st.expander(f"🎓 Promotion : {promo}"):
-                            st.dataframe(df_g, use_container_width=True, hide_index=True)
-                            b_ind1, b_ind2, b_ind3 = st.columns(3)
-                            with b_ind1:
-                                st.download_button(f"HTML - {promo}", generer_html_edt(df_g, promo), f"EDT_{promo}.html", "text/html", key=f"rep_html_{promo}")
-                            with b_ind2:
-                                st.download_button(f"Excel - {promo}", generer_excel_edt(df_g, promo), f"EDT_{promo}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"rep_xlsx_{promo}")
-                            with b_ind3:
-                                st.download_button(f"PDF - {promo}", generer_pdf_edt(attr_promo, promo, st.session_state.creneaux_actifs), f"EDT_{promo}.pdf", "application/pdf", key=f"rep_pdf_{promo}")
-                else:
-                    st.info(f"Promotion {promo} : Pas encore générée.")
+                # Génération des contenus
+                html_content = generer_html_edt(df_grille, promo_sel)
+                excel_buffer = generer_excel_edt(df_grille, promo_sel)
+                pdf_buffer = generer_pdf_edt(attr_promo, promo_sel, CRENEAUX)
+                
+                # Sauvegarde physique dans le répertoire
+                nom_html = f"EDT_{promo_sel}.html"
+                nom_excel = f"EDT_{promo_sel}.xlsx"
+                nom_pdf = f"EDT_{promo_sel}.pdf"
+                
+                sauvegarder_fichier_edt(html_content, nom_html, is_bytes=False)
+                sauvegarder_fichier_edt(excel_buffer.getvalue(), nom_excel, is_bytes=True)
+                sauvegarder_fichier_edt(pdf_buffer.getvalue(), nom_pdf, is_bytes=True)
+                
+                # Mise à jour de l'historique
+                st.session_state.historique_edt[promo_sel] = {
+                    'html': nom_html,
+                    'excel': nom_excel,
+                    'pdf': nom_pdf,
+                    'date_generation': datetime.now().strftime('%d/%m/%Y %H:%M')
+                }
+                
+                c1, c2, c3 = st.columns(3)
+                with c1: st.download_button("⬇️ HTML", html_content, nom_html, "text/html", key=f"dl_html_{promo_sel}")
+                with c2: st.download_button("⬇️ Excel", excel_buffer, nom_excel, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_xlsx_{promo_sel}")
+                with c3: st.download_button("⬇️ PDF", pdf_buffer, nom_pdf, "application/pdf", key=f"dl_pdf_{promo_sel}")
+                
+                st.success(f"✅ EDT de **{promo_sel}** sauvegardé dans `{REPERTOIRE_EDT}/`")
         else:
-            st.warning("⚠️ Veuillez d'abord générer les plannings et les attributions pour alimenter le répertoire.")
-
+            st.info("Aucune attribution pour cette promotion")
+    else:
+        st.warning("⚠️ Effectuez d'abord l'attribution")
+    
+    with tabs[5]:
+    st.markdown('<div class="sub-header">📊 Export Global</div>', unsafe_allow_html=True)
+    if st.session_state.surveillance_df is not None:
+        attributions = st.session_state.surveillance_df
+        c1, c2, c3 = st.columns(3)
+        with c1: st.download_button("⬇️ HTML", generer_tableau_html(attributions), "planning.html", "text/html", key="dl_gh")
+        with c2: st.download_button("⬇️ Excel", generer_excel_colore(attributions), "planning.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_gx")
+        with c3: st.download_button("⬇️ PDF", generer_pdf(attributions), "planning.pdf", "application/pdf", key="dl_gp")
+        
+        if st.session_state.historique_edt:
+            st.markdown("---")
+            st.markdown("### 📦 Téléchargement Groupé des EDT")
+            cg1, cg2, cg3, cg4 = st.columns(4)
+            with cg1:
+                zip_all = creer_zip_edt()
+                st.download_button("⬇️ ZIP Tous les EDT", zip_all, "EDTs_Toutes_Promotions.zip", "application/zip", key="dl_zip_all_exp")
+            with cg2:
+                zip_html = creer_zip_edt("html")
+                st.download_button("⬇️ ZIP HTML", zip_html, "EDTs_HTML.zip", "application/zip", key="dl_zip_html_exp")
+            with cg3:
+                zip_xlsx = creer_zip_edt("xlsx")
+                st.download_button("⬇️ ZIP Excel", zip_xlsx, "EDTs_Excel.zip", "application/zip", key="dl_zip_xlsx_exp")
+            with cg4:
+                zip_pdf = creer_zip_edt("pdf")
+                st.download_button("⬇️ ZIP PDF", zip_pdf, "EDTs_PDF.zip", "application/zip", key="dl_zip_pdf_exp")
+        
+        st.markdown("---")
+        st.markdown(generer_tableau_html(attributions), unsafe_allow_html=True)
+    else:
+        st.warning("Aucune attribution à exporter")
     with tabs[6]:
         st.markdown('<div class="sub-header">📊 Export Global — Grilles EDT par Promotion</div>', unsafe_allow_html=True)
 
