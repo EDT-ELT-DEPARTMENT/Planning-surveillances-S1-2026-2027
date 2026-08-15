@@ -317,7 +317,7 @@ def generer_planning_promo(examens_df, promotion, date_debut, date_fin, nb_par_j
             
     return df_working
 
-def attribuer_surveillances(planning_df, enseignants_df):
+def attribuer_surveillants(planning_df, enseignants_df):
     if planning_df is None or enseignants_df is None:
         return None, enseignants_df
         
@@ -345,7 +345,13 @@ def attribuer_surveillances(planning_df, enseignants_df):
     if 'round_robin_pointer' not in st.session_state:
         st.session_state.round_robin_pointer = 0
 
-    creneaux_actifs = st.session_state.get('creneaux_actifs', CRENEAUX_DEFAUT)
+    # Sécurisation des créneaux par défaut pour éviter tout NameError
+    creneaux_defaut_locaux = ['08h30 - 10h30']
+    try:
+        creneaux_actifs = st.session_state.get('creneaux_actifs', CRENEAUX_DEFAUT)
+    except NameError:
+        creneaux_actifs = st.session_state.get('creneaux_actifs', creneaux_defaut_locaux)
+
     charges_affectees_creneau = set()
 
     # Fonction interne de recherche par Round-Robin continu et persistant
@@ -355,7 +361,6 @@ def attribuer_surveillances(planning_df, enseignants_df):
             return None, None
             
         for i in range(n_total):
-            # Calcul de l'index actuel basé sur le pointeur persistant global
             ptr = (st.session_state.round_robin_pointer + i) % n_total
             s_nom = liste_tous_ens[ptr]
             
@@ -389,11 +394,9 @@ def attribuer_surveillances(planning_df, enseignants_df):
             current_count = row_s.iloc[0]['surveillance_attribuee']
             
             if current_count < quota:
-                # Avancer et sauvegarder le pointeur global pour le prochain appel
                 st.session_state.round_robin_pointer = (ptr + 1) % n_total
                 return s_nom, q_val
         
-        # Si aucun trouvé avec la qualité souhaitée, on réessaie sans contrainte de qualité
         if qualite_souhaitee:
             return trouver_surveillant_round_robin(None)
             
@@ -401,7 +404,7 @@ def attribuer_surveillances(planning_df, enseignants_df):
 
     for idx, examen in planning_df.iterrows():
         date_examen = examen.get('date', None)
-        creneau_examen = examen.get('Horaire', CRENEAUX_DEFAUT[0])
+        creneau_examen = examen.get('Horaire', creneaux_actifs[0] if creneaux_actifs else '08h30 - 10h30')
         matiere_examen = examen.get('Enseignements', '')
         enseignant_matiere = examen.get('Enseignants', '')
         lieu_examen = examen.get('Lieu', 'S01')
@@ -492,7 +495,7 @@ def attribuer_surveillances(planning_df, enseignants_df):
             'lieu': lieu_examen, 'surveillants': [s['nom'] for s in liste_surveillants], 'details_surveillants': liste_surveillants
         })
         
-    attributions = sorted(attributions, key=lambda x: (x.get('date', datetime.min), creneaux_actifs.index(x.get('creneau')) if x.get('creneau') in creneaux_actifs else 0, x.get('promotion', '')))
+    attributions = sorted(attributions, key=lambda x: (x.get('date', datetime.min if 'datetime' in globals() else str(x.get('date'))), creneaux_actifs.index(x.get('creneau')) if x.get('creneau') in creneaux_actifs else 0, x.get('promotion', '')))
     st.session_state.disponibilites_enseignants = disponibilites_enseignants
     return attributions, surveillants
 
