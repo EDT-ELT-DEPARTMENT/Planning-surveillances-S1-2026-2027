@@ -185,7 +185,11 @@ def charger_fichier_source_auto():
         if 'enseignements' in col_map: rename_map[col_map['enseignements']] = 'enseignements'
         if 'promotion' in col_map: rename_map[col_map['promotion']] = 'promotion'
         df_ens = df_ens.rename(columns=rename_map)
-        if 'nom' not in df_ens.columns:
+        # Garantir toutes les colonnes critiques
+        for col in ['nom', 'qualite', 'enseignements', 'promotion']:
+            if col not in df_ens.columns:
+                df_ens[col] = ''
+        if 'nom' not in df_ens.columns or df_ens['nom'].isna().all():
             for col in df_ens.columns:
                 if df_ens[col].dtype == 'object':
                     sample = df_ens[col].dropna().astype(str)
@@ -196,7 +200,10 @@ def charger_fichier_source_auto():
             if col not in df_ens.columns:
                 df_ens[col] = ''
         df_ens = df_ens[df_ens['nom'].notna() & (df_ens['nom'].astype(str).str.strip() != '')].copy()
-        df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)
+        if 'qualite' in df_ens.columns:
+            df_ens['qualite'] = df_ens['qualite'].apply(normaliser_qualite)
+        else:
+            df_ens['qualite'] = 'Permanent'
         examens_data = []
         for _, row in df_ens.iterrows():
             raw_ens = str(row.get('enseignements', ''))
@@ -985,29 +992,49 @@ def main():
             st.session_state.exclus_manuels = exclus
             if exclus: st.error(f"❌ Exclus: {', '.join(exclus)}")
             st.markdown("---")
+
+            # Colonnes disponibles
+            cols_dispo = list(df_ens.columns)
+            col_nom = 'nom' if 'nom' in cols_dispo else cols_dispo[0] if cols_dispo else None
+            col_qualite = 'qualite' if 'qualite' in cols_dispo else None
+            col_ens = 'enseignements' if 'enseignements' in cols_dispo else None
+            col_promo = 'promotion' if 'promotion' in cols_dispo else None
+
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("#### 👔 Permanents")
-                perm_df = df_ens[df_ens['qualite'] == 'Permanent'][['nom', 'enseignements', 'promotion']].copy()
-                perm_df['Exclu'] = perm_df['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
-                perm_df = perm_df.sort_values('Exclu', ascending=False)
-                st.markdown(f"<div class='card'><b>Total:</b> {len(perm_df)} | <b>Actifs:</b> {len(perm_df[perm_df['Exclu']=='✅ Non'])} | <b>Exclus:</b> {len(perm_df[perm_df['Exclu']=='❌ OUI'])}</div>", unsafe_allow_html=True)
-                if not perm_df.empty: st.dataframe(perm_df, use_container_width=True, hide_index=True)
-                else: st.info("Aucun permanent.")
+                if col_qualite and col_nom:
+                    perm_mask = df_ens[col_qualite] == 'Permanent'
+                    perm_cols = [c for c in [col_nom, col_ens, col_promo] if c]
+                    perm_df = df_ens[perm_mask][perm_cols].copy() if perm_cols else pd.DataFrame()
+                    if not perm_df.empty and col_nom:
+                        perm_df['Exclu'] = perm_df[col_nom].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
+                        perm_df = perm_df.sort_values('Exclu', ascending=False)
+                    st.markdown(f"<div class='card'><b>Total:</b> {len(perm_df)} | <b>Actifs:</b> {len(perm_df[perm_df['Exclu']=='✅ Non']) if 'Exclu' in perm_df.columns else 0} | <b>Exclus:</b> {len(perm_df[perm_df['Exclu']=='❌ OUI']) if 'Exclu' in perm_df.columns else 0}</div>", unsafe_allow_html=True)
+                    if not perm_df.empty: st.dataframe(perm_df, use_container_width=True, hide_index=True)
+                    else: st.info("Aucun permanent.")
+                else:
+                    st.info("Donnees qualite non disponibles.")
             with col2:
                 st.markdown("#### 📝 Vacataires")
-                vac_df = df_ens[df_ens['qualite'] == 'Vacataire'][['nom', 'enseignements', 'promotion']].copy()
-                vac_df['Exclu'] = vac_df['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
-                vac_df = vac_df.sort_values('Exclu', ascending=False)
-                st.markdown(f"<div class='card'><b>Total:</b> {len(vac_df)} | <b>Actifs:</b> {len(vac_df[vac_df['Exclu']=='✅ Non'])} | <b>Exclus:</b> {len(vac_df[vac_df['Exclu']=='❌ OUI'])}</div>", unsafe_allow_html=True)
-                if not vac_df.empty: st.dataframe(vac_df, use_container_width=True, hide_index=True)
-                else: st.info("Aucun vacataire.")
+                if col_qualite and col_nom:
+                    vac_mask = df_ens[col_qualite] == 'Vacataire'
+                    vac_cols = [c for c in [col_nom, col_ens, col_promo] if c]
+                    vac_df = df_ens[vac_mask][vac_cols].copy() if vac_cols else pd.DataFrame()
+                    if not vac_df.empty and col_nom:
+                        vac_df['Exclu'] = vac_df[col_nom].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
+                        vac_df = vac_df.sort_values('Exclu', ascending=False)
+                    st.markdown(f"<div class='card'><b>Total:</b> {len(vac_df)} | <b>Actifs:</b> {len(vac_df[vac_df['Exclu']=='✅ Non']) if 'Exclu' in vac_df.columns else 0} | <b>Exclus:</b> {len(vac_df[vac_df['Exclu']=='❌ OUI']) if 'Exclu' in vac_df.columns else 0}</div>", unsafe_allow_html=True)
+                    if not vac_df.empty: st.dataframe(vac_df, use_container_width=True, hide_index=True)
+                    else: st.info("Aucun vacataire.")
+                else:
+                    st.info("Donnees qualite non disponibles.")
             st.markdown("---")
             st.markdown("#### 📈 Resume")
             c1, c2, c3, c4, c5 = st.columns(5)
-            with c1: st.metric("Perm. actifs", len(perm_df[perm_df['Exclu']=='✅ Non']) if not perm_df.empty else 0)
-            with c2: st.metric("Vac. actifs", len(vac_df[vac_df['Exclu']=='✅ Non']) if not vac_df.empty else 0)
-            with c3: st.metric("Autres", len(df_ens[~df_ens['qualite'].isin(['Permanent', 'Vacataire'])]))
+            with c1: st.metric("Perm. actifs", len(perm_df[perm_df['Exclu']=='✅ Non']) if 'Exclu' in perm_df.columns and not perm_df.empty else 0)
+            with c2: st.metric("Vac. actifs", len(vac_df[vac_df['Exclu']=='✅ Non']) if 'Exclu' in vac_df.columns and not vac_df.empty else 0)
+            with c3: st.metric("Autres", len(df_ens[~df_ens[col_qualite].isin(['Permanent', 'Vacataire'])]) if col_qualite else 0)
             with c4: st.metric("Total actifs", len(df_ens) - len(exclus))
             with c5: st.metric("Exclus", len(exclus))
         else: st.warning("Donnees non chargees.")
