@@ -1649,7 +1649,7 @@ def main():
 
             uploaded_mapping = st.file_uploader("Fichier de mapping Enseignant → Email (Excel/CSV)", type=["xlsx", "csv"], key="email_mapping")
 
-            df = None
+            df = df_attributions.copy()
             if uploaded_mapping is not None:
                 if uploaded_mapping.name.endswith('.csv'):
                     df_map = pd.read_csv(uploaded_mapping)
@@ -1658,58 +1658,62 @@ def main():
                 if 'Enseignants' not in df_map.columns or 'Email' not in df_map.columns:
                     st.error("❌ Le fichier de mapping doit contenir obligatoirement les colonnes 'Enseignants' et 'Email'.")
                 else:
-                    df = df_attributions.merge(df_map[['Enseignants', 'Email']], on='Enseignants', how='left')
+                    df = df_attributions.merge(df_map[['Enseignants', 'Email']], on='Enseignants', how='left', suffixes=('', '_map'))
+                    # Si la fusion crée Email_map, on garde celle du mapping
+                    if 'Email_map' in df.columns:
+                        df['Email'] = df['Email_map']
+                        df = df.drop(columns=['Email_map'])
                     st.success("✅ Mapping email fusionné avec les attributions !")
-                    nb_avec_email = df['Email'].notna().sum()
-                    st.info(f"📊 {nb_avec_email} / {len(df)} lignes ont une adresse e-mail associée.")
             else:
-                st.info("💡 Aucun fichier de mapping importé. Vous pouvez quand même visualiser les attributions, mais l'envoi d'e-mails nécessite les adresses.")
-                df = df_attributions.copy()
+                st.info("💡 Aucun fichier de mapping importé. Les e-mails sont vides. Uploadez un fichier de mapping pour activer l'envoi.")
 
-            if df is not None:
-                enseignants_list = df['Enseignants'].dropna().unique()
+            # Statistiques emails
+            nb_avec_email = df['Email'].replace('', pd.NA).notna().sum() if 'Email' in df.columns else 0
+            st.info(f"📊 {nb_avec_email} / {len(df)} lignes ont une adresse e-mail associée.")
 
-                tab_indiv, tab_groupe = st.tabs(["👤 Envoi Individuel", "👥 Envoi par Groupe (Masse)"])
+            enseignants_list = df['Enseignants'].dropna().unique()
 
-                # --- 1. ENVOI INDIVIDUEL ---
-                with tab_indiv:
-                    st.subheader("Gestion et Envoi Individuel")
-                    selected_prof = st.selectbox("Sélectionner un surveillant", enseignants_list, key="email_select_prof")
+            tab_indiv, tab_groupe = st.tabs(["👤 Envoi Individuel", "👥 Envoi par Groupe (Masse)"])
 
-                    df_prof = df[df['Enseignants'] == selected_prof]
-                    prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and pd.notna(df_prof['Email'].iloc[0]) else ""
+            # --- 1. ENVOI INDIVIDUEL ---
+            with tab_indiv:
+                st.subheader("Gestion et Envoi Individuel")
+                selected_prof = st.selectbox("Sélectionner un surveillant", enseignants_list, key="email_select_prof")
 
-                    st.text(f"E-mail associé : {prof_email if prof_email else 'Aucun e-mail trouvé'}")
-                    st.markdown("**Planning de surveillance affecté :**")
-                    st.dataframe(df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']], use_container_width=True, hide_index=True)
+                df_prof = df[df['Enseignants'] == selected_prof]
+                prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and 'Email' in df_prof.columns and pd.notna(df_prof['Email'].iloc[0]) and str(df_prof['Email'].iloc[0]).strip() != '' else ""
 
-                    custom_msg = st.text_area("Message personnalisé (optionnel)", "Bonjour,\n\nVeuillez trouver ci-joint votre planning de surveillance pour les examens.\n\nCordialement,", key="email_custom_msg")
+                st.text(f"E-mail associé : {prof_email if prof_email else 'Aucun e-mail trouvé'}")
+                st.markdown("**Planning de surveillance affecté :**")
+                st.dataframe(df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']], use_container_width=True, hide_index=True)
 
-                    if st.button("Envoyer l'EDT à cet enseignant", key="email_btn_indiv"):
-                        if not prof_email:
-                            st.error("Impossible d'envoyer : l'adresse e-mail est manquante pour cet enseignant. Importez un fichier de mapping avec la colonne 'Email'.")
-                        elif not sender_email or not sender_password:
-                            st.error("Veuillez configurer les paramètres SMTP dans la barre latérale.")
-                        else:
-                            try:
-                                msg = MIMEMultipart()
-                                msg['From'] = sender_email
-                                msg['To'] = prof_email
-                                msg['Subject'] = "Plateforme de gestion des EDTs-S2-2026 - Votre planning de surveillance"
+                custom_msg = st.text_area("Message personnalisé (optionnel)", "Bonjour,\n\nVeuillez trouver ci-joint votre planning de surveillance pour les examens.\n\nCordialement,", key="email_custom_msg")
 
-                                corps_tableau = df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']].to_html(index=False)
-                                html_content = f"<p>{custom_msg.replace(chr(10), '<br>')}</p>{corps_tableau}"
-                                msg.attach(MIMEText(html_content, 'html'))
+                if st.button("Envoyer l'EDT à cet enseignant", key="email_btn_indiv"):
+                    if not prof_email:
+                        st.error("Impossible d'envoyer : l'adresse e-mail est manquante pour cet enseignant. Importez un fichier de mapping avec la colonne 'Email'.")
+                    elif not sender_email or not sender_password:
+                        st.error("Veuillez configurer les paramètres SMTP dans la barre latérale.")
+                    else:
+                        try:
+                            msg = MIMEMultipart()
+                            msg['From'] = sender_email
+                            msg['To'] = prof_email
+                            msg['Subject'] = "Plateforme de gestion des EDTs-S2-2026 - Votre planning de surveillance"
 
-                                server = smtplib.SMTP(smtp_server, smtp_port)
-                                server.starttls()
-                                server.login(sender_email, sender_password)
-                                server.sendmail(sender_email, prof_email, msg.as_string())
-                                server.quit()
+                            corps_tableau = df_prof[['Enseignements', 'Code', 'Horaire', 'Jours', 'Lieu', 'Promotion', 'Groupe']].to_html(index=False)
+                            html_content = f"<p>{custom_msg.replace(chr(10), '<br>')}</p>{corps_tableau}"
+                            msg.attach(MIMEText(html_content, 'html'))
 
-                                st.success(f"E-mail envoyé avec succès à {selected_prof} ({prof_email}) !")
-                            except Exception as e:
-                                st.error(f"Erreur lors de l'envoi : {e}")
+                            server = smtplib.SMTP(smtp_server, smtp_port)
+                            server.starttls()
+                            server.login(sender_email, sender_password)
+                            server.sendmail(sender_email, prof_email, msg.as_string())
+                            server.quit()
+
+                            st.success(f"E-mail envoyé avec succès à {selected_prof} ({prof_email}) !")
+                        except Exception as e:
+                            st.error(f"Erreur lors de l'envoi : {e}")
 
                 # --- 2. ENVOI PAR GROUPE ---
                 with tab_groupe:
@@ -1732,7 +1736,7 @@ def main():
 
                                 for i, prof in enumerate(enseignants_list):
                                     df_prof = df[df['Enseignants'] == prof]
-                                    prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and pd.notna(df_prof['Email'].iloc[0]) else ""
+                                    prof_email = df_prof['Email'].iloc[0] if not df_prof.empty and 'Email' in df_prof.columns and pd.notna(df_prof['Email'].iloc[0]) and str(df_prof['Email'].iloc[0]).strip() != '' else ""
 
                                     if prof_email:
                                         msg = MIMEMultipart()
