@@ -1087,6 +1087,156 @@ def envoyer_email_edt(destinataire, sujet, corps, fichier_buffer, nom_fichier_pi
     except Exception as e:
         return False, f"Erreur lors de l'envoi : {str(e)}"
 
+
+
+def generer_excel_toutes_promotions():
+    """Génère un fichier Excel multi-feuilles avec la grille EDT de chaque promotion."""
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    header_fill = PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True, size=11)
+    creneau_fill = PatternFill(start_color="E3F2FD", end_color="E3F2FD", fill_type="solid")
+    creneau_font = Font(bold=True, size=10)
+    cell_fill = PatternFill(start_color="FFF8E1", end_color="FFF8E1", fill_type="solid")
+    cell_font = Font(size=9)
+    thin_border = Border(left=Side(style='thin', color='90CAF9'), right=Side(style='thin', color='90CAF9'),
+                         top=Side(style='thin', color='90CAF9'), bottom=Side(style='thin', color='90CAF9'))
+
+    for promo in st.session_state.promotions_list:
+        attr_promo = [a for a in st.session_state.surveillance_df if str(a.get('promotion', '')).strip() == str(promo).strip()]
+        if not attr_promo:
+            continue
+        df_grille, _, _ = construire_grille_edt(attr_promo, st.session_state.creneaux_actifs)
+        if df_grille is None or df_grille.empty:
+            continue
+
+        ws = wb.create_sheet(title=nettoyer_nom_feuille(f"EDT {promo}"))
+        headers = ['Creneau'] + [c for c in df_grille.columns if c != 'Creneau']
+
+        for c_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=c_idx, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = thin_border
+
+        for r_idx, row in df_grille.iterrows():
+            for c_idx, col_name in enumerate(headers, 1):
+                val = row.get(col_name, '')
+                cell = ws.cell(row=r_idx + 2, column=c_idx, value=val)
+                cell.border = thin_border
+                cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                if col_name == 'Creneau':
+                    cell.fill = creneau_fill
+                    cell.font = creneau_font
+                else:
+                    cell.fill = cell_fill
+                    cell.font = cell_font
+
+        for col in ws.columns:
+            max_length = 0
+            column = col[0].column_letter
+            for cell in col:
+                try:
+                    if cell.value: max_length = max(max_length, len(str(cell.value)))
+                except: pass
+            ws.column_dimensions[column].width = min(max(max_length + 2, 15), 50)
+
+    if len(wb.sheetnames) == 0:
+        ws = wb.create_sheet(title="Vide")
+        ws.cell(row=1, column=1, value="Aucune donnée disponible")
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+def generer_pdf_toutes_promotions():
+    """Génère un PDF multi-pages avec la grille EDT de chaque promotion."""
+    from reportlab.platypus import PageBreak
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=1*cm, leftMargin=1*cm, topMargin=1*cm, bottomMargin=1*cm)
+    elements = []
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=13, textColor=colors.HexColor('#1565C0'), spaceAfter=6, alignment=1)
+    subtitle_style = ParagraphStyle('SubTitle', parent=styles['Normal'], alignment=1, fontSize=10, textColor=colors.HexColor('#333333'), spaceAfter=10)
+
+    first_page = True
+    for promo in st.session_state.promotions_list:
+        attr_promo = [a for a in st.session_state.surveillance_df if str(a.get('promotion', '')).strip() == str(promo).strip()]
+        if not attr_promo:
+            continue
+        df_grille, jours_ordre, _ = construire_grille_edt(attr_promo, st.session_state.creneaux_actifs)
+        if df_grille is None or df_grille.empty:
+            continue
+
+        if not first_page:
+            elements.append(PageBreak())
+        first_page = False
+
+        elements.append(Paragraph(TITRE_PLATEFORME, title_style))
+        elements.append(Paragraph(f"Promotion {promo}", subtitle_style))
+        elements.append(Spacer(1, 0.2*cm))
+
+        jours_cols = [c for c in df_grille.columns if c != 'Creneau']
+        header_style = ParagraphStyle('TableHeader', parent=styles['Normal'], fontSize=8, leading=10, textColor=colors.whitesmoke, alignment=1, fontName='Helvetica-Bold')
+        creneau_header_style = ParagraphStyle('CreneauHeader', parent=header_style, fontSize=8, leading=10)
+        table_data = [[Paragraph('Creneau / Horaire', creneau_header_style)] + [Paragraph(j.replace('\n', '<br/>'), header_style) for j in jours_cols]]
+        cell_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontSize=7, leading=9, alignment=1, textColor=colors.HexColor('#333333'))
+        creneau_cell_style = ParagraphStyle('CreneauCell', parent=cell_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#1565C0'))
+
+        for _, row in df_grille.iterrows():
+            row_data = [Paragraph(str(row['Creneau']), creneau_cell_style)]
+            for jour in jours_cols:
+                val = row.get(jour, '')
+                if val:
+                    parts = val.split('\n---\n')
+                    formatted_parts = []
+                    for part in parts:
+                        lines_pdf = part.split('\n')
+                        f_lines = []
+                        for line in lines_pdf:
+                            if line.startswith('📖 '): f_lines.append(f"<b>{line}</b>")
+                            elif line.startswith('👤 Promotion: '): f_lines.append(f"<font color='#00796B'><b>Promotion: {line[14:]}</b></font>")
+                            elif line.startswith('👤 '): f_lines.append(f"{line.replace('👤 ', '')}")
+                            elif line.startswith('🏫 '): f_lines.append(f"<font color='#E65100'><b>{line}</b></font>")
+                            elif line.startswith('• '): f_lines.append(f"<font color='#2E7D32'>{line}</font>")
+                            elif line == '👮': continue
+                            else: f_lines.append(line)
+                        formatted_parts.append("<br/>".join(f_lines))
+                    cell_content = "<br/><br/>".join(formatted_parts)
+                    row_data.append(Paragraph(cell_content, cell_style))
+                else:
+                    row_data.append(Paragraph("", cell_style))
+            table_data.append(row_data)
+
+        available_width = 27.7 * cm
+        col_widths = [3 * cm] + [(available_width - 3 * cm) / len(jours_cols)] * len(jours_cols)
+        table = Table(table_data, repeatRows=1, colWidths=col_widths)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565C0')),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#90CAF9')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#E3F2FD'), colors.HexColor('#FFFFFF')]),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(table)
+        elements.append(Spacer(1, 0.5*cm))
+
+    if not elements:
+        elements.append(Paragraph("Aucune donnée", styles['Normal']))
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+
 def main():
     init_session_state()
     charger_persistence()
@@ -1654,17 +1804,68 @@ def main():
             st.warning("⚠️ Veuillez d'abord générer les plannings et les attributions pour alimenter le répertoire.")
 
     with tabs[6]:
-        st.markdown('<div class="sub-header">Export Global Chronologique</div>', unsafe_allow_html=True)
-        if st.session_state.surveillance_df is not None:
-            attributions = st.session_state.surveillance_df
-            col1, col2, col3 = st.columns(3)
-            with col1: st.download_button("⬇️ Télécharger HTML", generer_tableau_html(attributions, st.session_state.creneaux_actifs), "planning_surveillances.html", "text/html", key="dl_gh")
-            with col2: st.download_button("⬇️ Télécharger Excel", generer_excel_colore(attributions), "planning_surveillances.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.spreadsheet", key="dl_gx")
-            with col3: st.download_button("⬇️ Télécharger PDF", generer_pdf(attributions), "planning_surveillances.pdf", "application/pdf", key="dl_gp")
-            st.markdown("---")
-            st.markdown(generer_tableau_html(attributions, st.session_state.creneaux_actifs), unsafe_allow_html=True)
-        else: st.warning("Aucune attribution à exporter.")
+        st.markdown('<div class="sub-header">📊 Export Global — Grilles EDT par Promotion</div>', unsafe_allow_html=True)
 
+        if st.session_state.surveillance_df is None or len(st.session_state.surveillance_df) == 0:
+            st.warning("⚠️ Aucune attribution à exporter. Veuillez d'abord générer les attributions dans l'onglet 🎯 Attributions.")
+        else:
+            # --- TÉLÉCHARGEMENT GROUPÉ (toutes les promotions) ---
+            st.markdown("### 📦 Téléchargement Groupé — Toutes les Promotions")
+            col_g1, col_g2 = st.columns(2)
+            with col_g1:
+                st.download_button(
+                    "⬇️ Télécharger TOUTES les promotions (Excel multi-feuilles)",
+                    generer_excel_toutes_promotions(),
+                    "Toutes_Promotions_EDT_Grille.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_all_excel"
+                )
+            with col_g2:
+                st.download_button(
+                    "⬇️ Télécharger TOUTES les promotions (PDF multi-pages)",
+                    generer_pdf_toutes_promotions(),
+                    "Toutes_Promotions_EDT_Grille.pdf",
+                    "application/pdf",
+                    key="dl_all_pdf"
+                )
+
+            st.markdown("---")
+            st.markdown("### 📑 Grilles EDT par Promotion (Individuel)")
+
+            for promo in st.session_state.promotions_list:
+                attr_promo = [a for a in st.session_state.surveillance_df if str(a.get('promotion', '')).strip() == str(promo).strip()]
+                if not attr_promo:
+                    continue
+
+                df_grille, jours_ordre, _ = construire_grille_edt(attr_promo, st.session_state.creneaux_actifs)
+                if df_grille is None or df_grille.empty:
+                    continue
+
+                with st.container(border=True):
+                    st.markdown(f"#### 🎓 Promotion : **{promo}**")
+                    st.dataframe(df_grille, use_container_width=True, hide_index=True)
+
+                    col1, col2, col3 = st.columns([1, 1, 2])
+                    with col1:
+                        st.download_button(
+                            f"⬇️ Excel — {promo}",
+                            generer_excel_edt(df_grille, promo),
+                            f"EDT_{promo}_Grille.xlsx",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"dl_indiv_excel_{promo}"
+                        )
+                    with col2:
+                        st.download_button(
+                            f"⬇️ PDF — {promo}",
+                            generer_pdf_edt(attr_promo, promo, st.session_state.creneaux_actifs),
+                            f"EDT_{promo}_Grille.pdf",
+                            "application/pdf",
+                            key=f"dl_indiv_pdf_{promo}"
+                        )
+                    with col3:
+                        st.markdown(f"<span style='color:#666; font-size:0.85rem;'>📊 {len(attr_promo)} séance(s) de surveillance | {len(jours_ordre)} jour(s)</span>", unsafe_allow_html=True)
+
+                st.markdown("<br>", unsafe_allow_html=True)
     with tabs[7]:
         st.markdown('<div class="sub-header">📤 Envoyer l''EDT par E-mail (Surveillance)</div>', unsafe_allow_html=True)
 
