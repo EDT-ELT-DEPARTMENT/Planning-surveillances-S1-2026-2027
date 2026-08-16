@@ -124,9 +124,30 @@ def init_session_state():
             st.session_state[key] = value
 
 def compter_enseignants_quota_atteint(enseignants_df, quotas):
-    """Compte les enseignants qui ont atteint leur quota max"""
+    """Compte les enseignants qui ont atteint leur quota max en comptant directement depuis les attributions."""
     if enseignants_df is None or enseignants_df.empty:
         return {}
+    
+    # ✅ CORRECTION : Compter directement depuis surveillance_df (source de vérité)
+    surveillance_df = st.session_state.get('surveillance_df', [])
+    comptage_reel = {}
+    
+    if surveillance_df:
+        for attr in surveillance_df:
+            # Compter le chargé de matière
+            ens_matiere = attr.get('enseignant', '')
+            if ens_matiere:
+                q_match = enseignants_df[enseignants_df['nom'] == ens_matiere]
+                if not q_match.empty:
+                    q_val = q_match.iloc[0]['qualite']
+                    comptage_reel.setdefault(ens_matiere, {'count': 0, 'qualite': q_val})
+                    comptage_reel[ens_matiere]['count'] += 1
+            # Compter les surveillants
+            for s in attr.get('details_surveillants', []):
+                nom_s = s['nom']
+                q_s = s.get('qualite', 'Permanent')
+                comptage_reel.setdefault(nom_s, {'count': 0, 'qualite': q_s})
+                comptage_reel[nom_s]['count'] += 1
     
     comptage = {}
     for qualite in ['Permanent', 'Vacataire', 'Autre']:
@@ -134,11 +155,13 @@ def compter_enseignants_quota_atteint(enseignants_df, quotas):
         ens_qualite = enseignants_df[enseignants_df['qualite'] == qualite]
         nb_total = len(ens_qualite)
         
-        # ✅ CORRECTION: Vérifier que la colonne existe avant d'y accéder
-        if 'surveillance_attribuee' in ens_qualite.columns:
-            nb_quota_atteint = len(ens_qualite[ens_qualite['surveillance_attribuee'] >= quota])
-        else:
-            nb_quota_atteint = 0
+        # ✅ CORRECTION : Compte depuis les attributions réelles, pas depuis la colonne
+        nb_quota_atteint = 0
+        for _, row in ens_qualite.iterrows():
+            nom_ens = row['nom']
+            nb_surv = comptage_reel.get(nom_ens, {}).get('count', 0)
+            if nb_surv >= quota:
+                nb_quota_atteint += 1
         
         comptage[qualite] = {
             'total': nb_total,
