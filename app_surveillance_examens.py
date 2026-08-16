@@ -123,6 +123,7 @@ def init_session_state():
         if key not in st.session_state:
             st.session_state[key] = value
 
+
 def compter_enseignants_quota_atteint(enseignants_df, quotas):
     """Compte les enseignants qui ont atteint leur quota max en comptant directement depuis les attributions."""
     if enseignants_df is None or enseignants_df.empty:
@@ -155,7 +156,7 @@ def compter_enseignants_quota_atteint(enseignants_df, quotas):
         ens_qualite = enseignants_df[enseignants_df['qualite'] == qualite]
         nb_total = len(ens_qualite)
         
-        # ✅ CORRECTION : Compte depuis les attributions réelles, pas depuis la colonne
+        # ✅ CORRECTION : Compte depuis les attributions réelles
         nb_quota_atteint = 0
         for _, row in ens_qualite.iterrows():
             nom_ens = row['nom']
@@ -1514,6 +1515,7 @@ def main():
             with c3: st.metric("Cours filtrés", len(st.session_state.examens_df))
             with c4: st.metric("Promotions", len(st.session_state.promotions_list))
 
+    
     with tabs[1]:
         st.markdown('<div class="sub-header">Gestion des Enseignants et Qualité</div>', unsafe_allow_html=True)
         if st.session_state.data_loaded:
@@ -1532,7 +1534,7 @@ def main():
                             if ens_selectionne in survs or attr.get('enseignant') == ens_selectionne:
                                 details_assigns.append(attr)
                     
-                    # ✅ CORRECTION 1: Compter correctement = nombre exact de lignes dans le tableau
+                    # Nombre exact de surveillances
                     nb_surv_actuel = len(details_assigns)
                                 
                     col_m1, col_m2 = st.columns(2)
@@ -1544,15 +1546,33 @@ def main():
                         
                     if details_assigns:
                         st.markdown(f"**Détails des examens / surveillances associés à {ens_selectionne} :** ({nb_surv_actuel} enregistrement(s))")
+                        
+                        # ➕ CONSTRUCTION DU DATAFRAME AVEC COLONNE NOMBRE TOTAL
                         df_details_ens = pd.DataFrame([{
                             'Date': (a['date'].strftime('%d/%m/%Y') if hasattr(a.get('date'), 'strftime') else str(a.get('date'))),
                             'Horaire': a.get('creneau'),
                             'Matière': a.get('matiere'),
                             'Promotion': a.get('promotion'),
                             'Lieu': a.get('lieu'),
-                            'Rôle': ('Chargé de matière' if a.get('enseignant') == ens_selectionne else 'Surveillant')
+                            'Rôle': ('Chargé de matière' if a.get('enseignant') == ens_selectionne else 'Surveillant'),
+                            'Nombre total de surveillances': nb_surv_actuel  # ➕ NOUVELLE COLONNE
                         } for a in details_assigns])
+                        
                         st.dataframe(df_details_ens, use_container_width=True, hide_index=True)
+                        
+                        # ⬇️ BOUTON DE TÉLÉCHARGEMENT EXCEL
+                        buffer_excel = io.BytesIO()
+                        with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+                            df_details_ens.to_excel(writer, index=False, sheet_name=f'Surveillances_{ens_selectionne}')
+                        buffer_excel.seek(0)
+                        
+                        st.download_button(
+                            label=f"⬇️ Télécharger le tableau Excel ({ens_selectionne})",
+                            data=buffer_excel,
+                            file_name=f"Surveillances_{ens_selectionne.replace(' ', '_')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"dl_surv_{ens_selectionne}"
+                        )
                     else:
                         st.info(f"Aucune surveillance ou enseignement assigné pour l'instant à {ens_selectionne}.")
             
@@ -1569,7 +1589,8 @@ def main():
                 disp_ens['Exclu'] = disp_ens['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
                 disp_ens = disp_ens.sort_values(by=['qualite', 'nom'], ascending=[True, True])
                 st.dataframe(disp_ens, use_container_width=True, hide_index=True)
-        else: st.warning("Données non chargées.")
+        else: 
+            st.warning("Données non chargées.")
 
     with tabs[2]:
         st.markdown('<div class="sub-header">Planification, Fractionnement & Cohérence par Promotion</div>', unsafe_allow_html=True)
