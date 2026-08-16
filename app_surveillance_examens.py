@@ -1394,7 +1394,7 @@ def main():
                 'Vacataire': st.session_state.nb_surv_vacataire,
                 'Autre': st.session_state.nb_surv_autre
             }
-            comptage_quota = compter_enseignants_quota_atteint(st.session_state.enseignants_df, quotas_dict)
+            comptage_quota = compter_surveillance_quota_atteint(st.session_state.surveillance_df, quotas_dict)
             
             st.markdown("#### 🎯 Enseignants ayant atteint leur quota")
             for qualite, data in comptage_quota.items():
