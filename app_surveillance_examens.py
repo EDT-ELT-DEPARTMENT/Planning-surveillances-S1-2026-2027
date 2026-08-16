@@ -1527,7 +1527,6 @@ def main():
             if all_ens:
                 ens_selectionne = st.selectbox("Sélectionner un enseignant dans la liste déroulante :", sorted(all_ens), key="select_ens_surv_display")
                 if ens_selectionne:
-                    # Récupérer les détails assignés
                     details_assigns = []
                     if st.session_state.surveillance_df is not None:
                         for attr in st.session_state.surveillance_df:
@@ -1535,7 +1534,6 @@ def main():
                             if ens_selectionne in survs or attr.get('enseignant') == ens_selectionne:
                                 details_assigns.append(attr)
                     
-                    # Nombre exact de surveillances
                     nb_surv_actuel = len(details_assigns)
                                 
                     col_m1, col_m2 = st.columns(2)
@@ -1568,19 +1566,15 @@ def main():
                     if col_req not in df_ens.columns:
                         df_ens[col_req] = ''
                 
-                # ➕ CONSTRUIRE LE TABLEAU GLOBAL AVEC NOMBRE DE SURVEILLANCES RÉEL
                 disp_ens = df_ens[['nom', 'qualite', 'Enseignements', 'Promotion']].copy()
                 
-                # Fonction helper pour compter les surveillances réelles depuis surveillance_df
                 def compter_surv_pour_enseignant(nom_ens):
                     if st.session_state.surveillance_df is None:
                         return 0
                     count = 0
                     for attr in st.session_state.surveillance_df:
-                        # Chargé de matière
                         if attr.get('enseignant') == nom_ens:
                             count += 1
-                        # Surveillants
                         for s in attr.get('details_surveillants', []):
                             if s['nom'] == nom_ens:
                                 count += 1
@@ -1589,8 +1583,6 @@ def main():
                 disp_ens['Nombre total de surveillances'] = disp_ens['nom'].apply(compter_surv_pour_enseignant)
                 disp_ens['Exclu'] = disp_ens['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
                 disp_ens = disp_ens.sort_values(by=['qualite', 'nom'], ascending=[True, True])
-                
-                # Renommer pour l'affichage
                 disp_ens = disp_ens.rename(columns={
                     'nom': 'Nom',
                     'qualite': 'Qualité',
@@ -1600,7 +1592,6 @@ def main():
                 
                 st.dataframe(disp_ens, use_container_width=True, hide_index=True)
                 
-                # ⬇️ BOUTON TÉLÉCHARGEMENT EXCEL DU TABLEAU GLOBAL
                 buffer_excel_global = io.BytesIO()
                 with pd.ExcelWriter(buffer_excel_global, engine='openpyxl') as writer:
                     disp_ens.to_excel(writer, index=False, sheet_name='Enseignants_Surveillances')
@@ -1613,23 +1604,7 @@ def main():
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="dl_ens_global"
                 )
-        else: 
-            st.warning("Données non chargées.")
-            
-            st.markdown("---")
-            exclus = st.multiselect("Sélectionner les enseignants à EXCLURE", sorted(all_ens), default=st.session_state.exclus_manuels, key="w_exclus")
-            st.session_state.exclus_manuels = exclus
-            if not df_ens.empty:
-                for col_req in ['nom', 'qualite', 'Enseignements', 'Promotion']:
-                    if col_req not in df_ens.columns:
-                        df_ens[col_req] = ''
-                disp_ens = df_ens[['nom', 'qualite', 'Enseignements', 'Promotion']].copy()
-                if 'surveillance_attribuee' in df_ens.columns:
-                    disp_ens['Surveillances attribuées'] = df_ens['surveillance_attribuee']
-                disp_ens['Exclu'] = disp_ens['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
-                disp_ens = disp_ens.sort_values(by=['qualite', 'nom'], ascending=[True, True])
-                st.dataframe(disp_ens, use_container_width=True, hide_index=True)
-        else: 
+        else:
             st.warning("Données non chargées.")
 
     with tabs[2]:
