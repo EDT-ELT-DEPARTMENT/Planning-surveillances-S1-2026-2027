@@ -1516,6 +1516,7 @@ def main():
             with c4: st.metric("Promotions", len(st.session_state.promotions_list))
 
     
+    
     with tabs[1]:
         st.markdown('<div class="sub-header">Gestion des Enseignants et Qualité</div>', unsafe_allow_html=True)
         if st.session_state.data_loaded:
@@ -1546,35 +1547,74 @@ def main():
                         
                     if details_assigns:
                         st.markdown(f"**Détails des examens / surveillances associés à {ens_selectionne} :** ({nb_surv_actuel} enregistrement(s))")
-                        
-                        # ➕ CONSTRUCTION DU DATAFRAME AVEC COLONNE NOMBRE TOTAL
                         df_details_ens = pd.DataFrame([{
                             'Date': (a['date'].strftime('%d/%m/%Y') if hasattr(a.get('date'), 'strftime') else str(a.get('date'))),
                             'Horaire': a.get('creneau'),
                             'Matière': a.get('matiere'),
                             'Promotion': a.get('promotion'),
                             'Lieu': a.get('lieu'),
-                            'Rôle': ('Chargé de matière' if a.get('enseignant') == ens_selectionne else 'Surveillant'),
-                            'Nombre total de surveillances': nb_surv_actuel  # ➕ NOUVELLE COLONNE
+                            'Rôle': ('Chargé de matière' if a.get('enseignant') == ens_selectionne else 'Surveillant')
                         } for a in details_assigns])
-                        
                         st.dataframe(df_details_ens, use_container_width=True, hide_index=True)
-                        
-                        # ⬇️ BOUTON DE TÉLÉCHARGEMENT EXCEL
-                        buffer_excel = io.BytesIO()
-                        with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
-                            df_details_ens.to_excel(writer, index=False, sheet_name=f'Surveillances_{ens_selectionne}')
-                        buffer_excel.seek(0)
-                        
-                        st.download_button(
-                            label=f"⬇️ Télécharger le tableau Excel ({ens_selectionne})",
-                            data=buffer_excel,
-                            file_name=f"Surveillances_{ens_selectionne.replace(' ', '_')}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key=f"dl_surv_{ens_selectionne}"
-                        )
                     else:
                         st.info(f"Aucune surveillance ou enseignement assigné pour l'instant à {ens_selectionne}.")
+            
+            st.markdown("---")
+            exclus = st.multiselect("Sélectionner les enseignants à EXCLURE", sorted(all_ens), default=st.session_state.exclus_manuels, key="w_exclus")
+            st.session_state.exclus_manuels = exclus
+            
+            if not df_ens.empty:
+                for col_req in ['nom', 'qualite', 'Enseignements', 'Promotion']:
+                    if col_req not in df_ens.columns:
+                        df_ens[col_req] = ''
+                
+                # ➕ CONSTRUIRE LE TABLEAU GLOBAL AVEC NOMBRE DE SURVEILLANCES RÉEL
+                disp_ens = df_ens[['nom', 'qualite', 'Enseignements', 'Promotion']].copy()
+                
+                # Fonction helper pour compter les surveillances réelles depuis surveillance_df
+                def compter_surv_pour_enseignant(nom_ens):
+                    if st.session_state.surveillance_df is None:
+                        return 0
+                    count = 0
+                    for attr in st.session_state.surveillance_df:
+                        # Chargé de matière
+                        if attr.get('enseignant') == nom_ens:
+                            count += 1
+                        # Surveillants
+                        for s in attr.get('details_surveillants', []):
+                            if s['nom'] == nom_ens:
+                                count += 1
+                    return count
+                
+                disp_ens['Nombre total de surveillances'] = disp_ens['nom'].apply(compter_surv_pour_enseignant)
+                disp_ens['Exclu'] = disp_ens['nom'].apply(lambda x: '❌ OUI' if x in exclus else '✅ Non')
+                disp_ens = disp_ens.sort_values(by=['qualite', 'nom'], ascending=[True, True])
+                
+                # Renommer pour l'affichage
+                disp_ens = disp_ens.rename(columns={
+                    'nom': 'Nom',
+                    'qualite': 'Qualité',
+                    'Enseignements': 'Enseignements',
+                    'Promotion': 'Promotion'
+                })
+                
+                st.dataframe(disp_ens, use_container_width=True, hide_index=True)
+                
+                # ⬇️ BOUTON TÉLÉCHARGEMENT EXCEL DU TABLEAU GLOBAL
+                buffer_excel_global = io.BytesIO()
+                with pd.ExcelWriter(buffer_excel_global, engine='openpyxl') as writer:
+                    disp_ens.to_excel(writer, index=False, sheet_name='Enseignants_Surveillances')
+                buffer_excel_global.seek(0)
+                
+                st.download_button(
+                    label="⬇️ Télécharger le tableau Excel (Tous les enseignants)",
+                    data=buffer_excel_global,
+                    file_name="Enseignants_et_Surveillances.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_ens_global"
+                )
+        else: 
+            st.warning("Données non chargées.")
             
             st.markdown("---")
             exclus = st.multiselect("Sélectionner les enseignants à EXCLURE", sorted(all_ens), default=st.session_state.exclus_manuels, key="w_exclus")
