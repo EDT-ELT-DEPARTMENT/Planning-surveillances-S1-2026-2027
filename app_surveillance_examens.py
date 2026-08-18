@@ -101,78 +101,88 @@ def generer_excel_bytes(df):
 
 @st.cache_data
 def charger_fichiers():
+    """Charge l'unique fichier source DATA-ASSIDUITE-2026.xlsx.
+    En-tête attendu : Enseignement | Code | Nom | Prénom | Qualité | Grade | Email | Téléphone | Promotion
+    Retourne : df_s (source EDT), map_nom_complet, dict emails, dict vacataires,
+               liste_permanents, liste_vacataires
+    """
     df_s = pd.DataFrame()
     map_nom_complet = {}
     d_em = {}
     is_vacataire = {}
 
-    FILE_CONTACTS = "Permanents-Vacataires-ELT2-2025-2026.xlsx"
+    if not os.path.exists(NOM_SOURCE):
+        st.error(f"Le fichier source {NOM_SOURCE} est introuvable à la racine du dépôt.")
+        return df_s, map_nom_complet, d_em, is_vacataire, [], []
 
-    if os.path.exists(FILE_CONTACTS):
-        try:
-            df_c = pd.read_excel(FILE_CONTACTS)
-            df_c.columns = [str(c).strip().upper() for c in df_c.columns]
-            
-            for _, row in df_c.iterrows():
-                n = str(row.get('NOM', '')).strip().upper()
-                p = str(row.get('PRÉNOM', '')).strip().upper()
-                
-                m_val = row.get('EMAIL') if 'EMAIL' in df_c.columns else row.get('Email')
-                m = str(m_val).strip().lower() if pd.notna(m_val) else ""
+    try:
+        df_f = pd.read_excel(NOM_SOURCE)
+        df_f.columns = [str(c).strip() for c in df_f.columns]
+        cols_upper = {str(c).strip().upper(): c for c in df_f.columns}
 
-                # Détection du statut (Permanent vs Vacataire)
-                # Détection robuste de la colonne Qualité (avec ou sans accent, maj/min)
-                cols_upper = [str(c).strip().upper() for c in df_c.columns]
-                qualite_col = None
-                for c in df_c.columns:
-                    c_upper = str(c).strip().upper()
-                    if c_upper in ['QUALITE', 'QUALITÉ', 'QUALITÉ', 'QUALITY']:
-                        qualite_col = c
-                        break
+        def trouver_col(*noms):
+            """Recherche de colonne tolérante (accents / casse / singulier-pluriel)."""
+            for n in noms:
+                if n.strip().upper() in cols_upper:
+                    return cols_upper[n.strip().upper()]
+            return None
 
-                if qualite_col:
-                    cat_val = str(row.get(qualite_col, '')).strip().lower()
-                else:
-                    cat_val = str(row.get('CATEGORIE', row.get('STATUT', ''))).strip().lower()
-                vac_flag = True if ('vacataire' in cat_val or 'vac' in cat_val or 'externe' in cat_val or 'assoc' in cat_val) else False
-                
-                if n and n != "NAN":
-                    nom_complet = f"{n} {p}".strip()
-                    map_nom_complet[n] = nom_complet
-                    is_vacataire[nom_complet] = vac_flag
-                    is_vacataire[n] = vac_flag
-                    
-                    if "@" in m:
-                        d_em[n] = m
-                        d_em[nom_complet] = m
-        except Exception as e:
-            st.error(f"Erreur lors de la lecture du fichier {FILE_CONTACTS} : {e}")
-    else:
-        st.error(f"Le fichier {FILE_CONTACTS} est introuvable à la racine du dépôt.")
+        c_ens   = trouver_col('Enseignement', 'Enseignements')
+        c_code  = trouver_col('Code')
+        c_nom   = trouver_col('Nom')
+        c_pren  = trouver_col('Prénom', 'Prenom')
+        c_qual  = trouver_col('Qualité', 'Qualite', 'QUALITÉ')
+        c_email = trouver_col('Email', 'E-mail', 'Mail')
+        c_promo = trouver_col('Promotion')
 
-    if os.path.exists("dataEDT-ELT-S2-2026.xlsx"):
-        try:
-            df_f = pd.read_excel("dataEDT-ELT-S2-2026.xlsx")
-            df_f.columns = [str(c).strip() for c in df_f.columns]
-            mask = df_f["Enseignements"].str.contains("Cours", case=False, na=False)
-            df_s = df_f[mask].copy()
-            for c in COLS_ORDRE:
-                if c not in df_s.columns: df_s[c] = ""
-            df_s = df_s[COLS_ORDRE]
-        except Exception as e:
-            st.error(f"Erreur source EDT : {e}")
-            
+        # --- 1) Annuaire des enseignants (nom complet, statut, email) ---
+        for _, row in df_f.iterrows():
+            n = str(row.get(c_nom, '')).strip().upper() if c_nom else ''
+            p = str(row.get(c_pren, '')).strip().upper() if c_pren else ''
+            if p == 'NAN':
+                p = ''
+            m = str(row.get(c_email, '')).strip().lower() if c_email else ''
+            if m == 'nan':
+                m = ''
+            cat_val = str(row.get(c_qual, '')).strip().lower() if c_qual else ''
+            vac_flag = ('vac' in cat_val or 'externe' in cat_val or 'assoc' in cat_val)
+
+            if n and n != 'NAN':
+                nom_complet = f"{n} {p}".strip()
+                map_nom_complet[n] = nom_complet
+                is_vacataire[nom_complet] = vac_flag
+                is_vacataire[n] = vac_flag
+                if '@' in m:
+                    d_em[n] = m
+                    d_em[nom_complet] = m
+
+        # --- 2) Source EDT : une ligne par enseignement (Cours uniquement) ---
+        df_s = pd.DataFrame({
+            'Enseignements': df_f[c_ens].astype(str).str.strip() if c_ens else '',
+            'Code': df_f[c_code].astype(str).str.strip() if c_code else '',
+            'Enseignants': df_f[c_nom].astype(str).str.strip().str.upper() if c_nom else '',
+            'Promotion': df_f[c_promo].astype(str).str.strip() if c_promo else '',
+        })
+        mask = df_s['Enseignements'].str.contains('Cours', case=False, na=False)
+        df_s = df_s[mask].copy()
+        df_s['Horaire'] = ''
+        df_s['Jours'] = ''
+        df_s['Lieu'] = ''
+        df_s = df_s[COLS_ORDRE].reset_index(drop=True)
+    except Exception as e:
+        st.error(f"Erreur de lecture du fichier {NOM_SOURCE} : {e}")
+
     # Création des listes séparées Permanent / Vacataire depuis le fichier source
     liste_permanents = []
     liste_vacataires = []
 
-    for nom_complet in map_nom_complet.values():
+    for nom_complet in sorted(set(map_nom_complet.values())):
         if is_vacataire.get(nom_complet, False):
             liste_vacataires.append(nom_complet)
         else:
             liste_permanents.append(nom_complet)
 
-    return df_s, map_nom_complet, d_em, is_vacataire, sorted(liste_permanents), sorted(liste_vacataires)
+    return df_s, map_nom_complet, d_em, is_vacataire, liste_permanents, liste_vacataires
 
 df_src, map_noms, dict_emails, dict_vacataires, LISTE_PERMANENTS, LISTE_VACATAIRES = charger_fichiers()
 
@@ -1179,16 +1189,47 @@ with t1:
             "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S08 BIS", "SN",
             "A01", "A02", "A03", "A04", "A05", "A06", "A07", "A08", "A09", "A10", "A11", "A12"
         ]
+
+        # === DÉTECTION AUTOMATIQUE DES MATIÈRES COMMUNES (fichier source) ===
+        # Une matière est "commune" si le MÊME enseignant assure le MÊME intitulé
+        # sur PLUSIEURS promotions.
+        if not df_src.empty:
+            g_all = df_src.groupby(["Enseignants", "Enseignements"])["Promotion"] \
+                          .apply(lambda s: sorted(set(s))).reset_index()
+            g_all = g_all[g_all["Promotion"].apply(len) > 1]
+            if not g_all.empty:
+                with st.expander(f"🔗 {len(g_all)} matière(s) commune(s) détectée(s) dans le fichier source", expanded=False):
+                    for _, r in g_all.iterrows():
+                        st.markdown(f"- **{get_nom_complet(r['Enseignants'])}** — {r['Enseignements']} → {' / '.join(r['Promotion'])}")
+
         c1, c2 = st.columns(2)
         with c1:
             resp_c = st.selectbox("Chargé de matière", LISTE_PROFS, key="sc_resp")
             nom_famille_seul = str(resp_c).split(" ")[0].strip().upper()
             mats_dispo = []
+            map_mat_promos = {}
             if not df_src.empty:
                 mask_mats = df_src["Enseignants"].str.upper().str.strip() == nom_famille_seul
-                mats_dispo = sorted(df_src[mask_mats]["Enseignements"].unique().tolist())
+                df_resp = df_src[mask_mats]
+                mats_dispo = sorted(df_resp["Enseignements"].unique().tolist())
+                map_mat_promos = df_resp.groupby("Enseignements")["Promotion"] \
+                                        .apply(lambda s: sorted(set(s))).to_dict()
             mat_sel_sc = st.selectbox("Matière", ["Toutes les matières"] + mats_dispo)
-            p_c = st.multiselect("Promotions concernées", list(DATA_AUTO.keys()))
+
+            # Matières communes de CET enseignant
+            mat_com = {m: ps for m, ps in map_mat_promos.items() if len(ps) > 1}
+            if mat_com:
+                with st.expander(f"📚 Matière(s) commune(s) pour {resp_c} ({len(mat_com)})", expanded=True):
+                    for m, ps in mat_com.items():
+                        st.markdown(f"- **{m}** → {' / '.join(ps)}")
+
+            # Pré-sélection automatique des promotions si la matière choisie est commune
+            promos_defaut = []
+            if mat_sel_sc in mat_com:
+                promos_defaut = [p for p in mat_com[mat_sel_sc] if p in DATA_AUTO]
+                st.success(f"🔗 Matière commune : promotions proposées automatiquement → {' / '.join(promos_defaut)}")
+            p_c = st.multiselect("Promotions concernées", list(DATA_AUTO.keys()),
+                                 default=promos_defaut, key=f"sc_promos_{mat_sel_sc}")
 
         h_defaut, s_defaut = "08h30 – 10h30", []
         if p_c:
@@ -1255,6 +1296,14 @@ with t2:
 
             if m_f_sel:
                 mats_final = mats_p if "Toutes les matières" in m_f_sel else m_f_sel
+
+                # === ALERTE MATIÈRES COMMUNES ===
+                if not df_src.empty:
+                    communes_p = [m for m in mats_final
+                                  if df_src[df_src["Enseignements"] == m]["Promotion"].nunique() > 1]
+                    if communes_p:
+                        st.warning(f"🔗 Matière(s) commune(s) détectée(s) : **{', '.join(communes_p)}** — "
+                                   "pensez à l'onglet 🚀 SESSION COMMUNE pour mutualiser les surveillances.")
 
                 # === PLANNING ÉDITABLE PAR MATIÈRE ===
                 st.markdown("### 📋 Ordre, dates et horaires des examens")
@@ -1453,11 +1502,11 @@ with t6:
     if pwd_t6 == "1234":
         st.markdown(f"### 📝 Suivi de l'Assiduité")
         
-        df_aff_a = charger_donnees_locales(FILE_DATA_A)
-        df_etud_m = charger_donnees_locales(FILE_LISTE_A)
+        df_aff_a = df_src  # Source unique déjà chargée (Enseignements / Enseignants / Promotion)
+        df_etud_m = charger_donnees_locales(FILE_LISTE_A)  # OPTIONNEL : liste des étudiants
 
-        if df_aff_a.empty or df_etud_m.empty:
-            st.error("⚠️ Fichiers sources (.xlsx) introuvables.")
+        if df_aff_a.empty:
+            st.error("⚠️ Fichier source (.xlsx) introuvable.")
         else:
             c1a, c2a = st.columns(2)
             with c1a:
@@ -1475,51 +1524,58 @@ with t6:
                     info_rows = df_aff_a[(df_aff_a["Enseignants"].str.upper().str.strip() == nom_famille_a) & (df_aff_a["Enseignements"] == sel_mat)]
                     if not info_rows.empty:
                         promo_c = str(info_rows.iloc[0]["Promotion"]).strip()
-                        df_p = df_etud_m[df_etud_m["Promotion"].astype(str).str.strip() == promo_c].copy()
-                        
-                        if not df_p.empty:
-                            df_p["Nom_Complet"] = df_p["Nom"].str.upper() + " " + df_p["Prénom"].str.title()
-                            noms_e = sorted(df_p["Nom_Complet"].tolist())
-                            
-                            st.divider()
-                            st.info(f"📍 Promotion détectée : **{promo_c}**")
-                            
-                            st.markdown("#### 🚫 Gestion de la Non-Éligibilité (Retrait)")
-                            cn1, cn2 = st.columns(2)
-                            with cn1:
+
+                        # Liste des étudiants (optionnelle) : si le fichier est absent, saisie manuelle
+                        df_p = pd.DataFrame()
+                        if not df_etud_m.empty and {'Nom', 'Prénom', 'Promotion'}.issubset(set(df_etud_m.columns)):
+                            df_p = df_etud_m[df_etud_m["Promotion"].astype(str).str.strip() == promo_c].copy()
+
+                        st.divider()
+                        st.info(f"📍 Promotion détectée : **{promo_c}**")
+
+                        st.markdown("#### 🚫 Gestion de la Non-Éligibilité (Retrait)")
+                        cn1, cn2 = st.columns(2)
+                        with cn1:
+                            if not df_p.empty:
+                                df_p["Nom_Complet"] = df_p["Nom"].astype(str).str.upper() + " " + df_p["Prénom"].astype(str).str.title()
+                                noms_e = sorted(df_p["Nom_Complet"].tolist())
                                 etud_non = st.selectbox("👤 Étudiant concerné (Exclusion) :", [""] + noms_e, key="ne_et_t6")
-                            with cn2:
-                                causes = ["Hospitalisation", "Congé Académique", "Matière Acquise", "Exclu de matière", "Absence en TD", "Absence en TP"]
-                                cause_s = st.selectbox("❓ Motif du retrait :", causes, key="ne_ca_t6")
+                            else:
+                                noms_e = []
+                                st.caption("⚠️ Liste des étudiants non chargée : saisie manuelle.")
+                                etud_non = st.text_input("👤 Nom et prénom de l'étudiant (Exclusion) :", key="ne_et_t6")
+                        with cn2:
+                            causes = ["Hospitalisation", "Congé Académique", "Matière Acquise", "Exclu de matière", "Absence en TD", "Absence en TP"]
+                            cause_s = st.selectbox("❓ Motif du retrait :", causes, key="ne_ca_t6")
 
-                            c_d1, c_d2, c_d3 = st.columns(3)
-                            with c_d1:
-                                date_abs = st.date_input("📅 Date de l'absence :", key="date_abs_t6")
-                            with c_d2:
-                                jours_semaine = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"]
-                                jour_abs = st.selectbox("🗓️ Jour :", jours_semaine, key="jour_abs_t6")
-                            with c_d3:
-                                horaire_abs = st.selectbox("🕒 Horaire :", options=HORAIRES_LIST, key="horaire_abs_t6")
+                        c_d1, c_d2, c_d3 = st.columns(3)
+                        with c_d1:
+                            date_abs = st.date_input("📅 Date de l'absence :", key="date_abs_t6")
+                        with c_d2:
+                            jours_semaine = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"]
+                            jour_abs = st.selectbox("🗓️ Jour :", jours_semaine, key="jour_abs_t6")
+                        with c_d3:
+                            horaire_abs = st.selectbox("🕒 Horaire :", options=HORAIRES_LIST, key="horaire_abs_t6")
 
-                            if st.button("💾 ENREGISTRER DANS SUPABASE", use_container_width=True):
-                                try:
-                                    payload = {
-                                        "enseignant": sel_prof,
-                                        "matiere": sel_mat,
-                                        "promotion": promo_c,
-                                        "etud_non_eligible": etud_non if etud_non else "",
-                                        "cause_non_eligibilite": cause_s if cause_s else "",
-                                        "date_absence": str(date_abs),
-                                        "jour_absence": jour_abs,
-                                        "horaire_absence": horaire_abs,
-                                        "date_saisie": datetime.now().strftime("%d/%m/%Y %H:%M")
-                                    }
-                                    supabase.table("suivi_assiduite_2026").insert(payload).execute()
-                                    st.success(f"✅ Données enregistrées pour {sel_mat} !")
-                                    time.sleep(1) 
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"❌ Erreur lors de l'enregistrement : {e}")
+                        if st.button("💾 ENREGISTRER DANS SUPABASE", use_container_width=True):
+                            try:
+                                payload = {
+                                    "enseignant": sel_prof,
+                                    "matiere": sel_mat,
+                                    "promotion": promo_c,
+                                    "etud_non_eligible": etud_non if etud_non else "",
+                                    "cause_non_eligibilite": cause_s if cause_s else "",
+                                    "date_absence": str(date_abs),
+                                    "jour_absence": jour_abs,
+                                    "horaire_absence": horaire_abs,
+                                    "date_saisie": datetime.now().strftime("%d/%m/%Y %H:%M")
+                                }
+                                supabase.table("suivi_assiduite_2026").insert(payload).execute()
+                                st.success(f"✅ Données enregistrées pour {sel_mat} !")
+                                time.sleep(1)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Erreur lors de l'enregistrement : {e}")
     elif pwd_t6 != "":
         st.error("❌ Code incorrect.")
 
@@ -1534,10 +1590,16 @@ with t7:
         with st.form("form_depot_pdf_etudiant", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                l_etud = noms_e if 'noms_e' in locals() else ["Veuillez charger une promotion en T6"]
-                etudiant_select = st.selectbox("Votre Nom et Prénom :", l_etud, key="sel_nom_etud_t7")
-                l_mat = liste_mats if 'liste_mats' in locals() else ["Veuillez charger un enseignant en T6"]
-                matiere_select = st.selectbox("Matière concernée :", l_mat, key="sel_mat_etud_t7")
+                l_etud = noms_e if ('noms_e' in locals() and noms_e) else None
+                if l_etud:
+                    etudiant_select = st.selectbox("Votre Nom et Prénom :", l_etud, key="sel_nom_etud_t7")
+                else:
+                    etudiant_select = st.text_input("Votre Nom et Prénom :", key="sel_nom_etud_t7")
+                l_mat = liste_mats if ('liste_mats' in locals() and liste_mats) else None
+                if l_mat:
+                    matiere_select = st.selectbox("Matière concernée :", l_mat, key="sel_mat_etud_t7")
+                else:
+                    matiere_select = st.text_input("Matière concernée :", key="sel_mat_etud_t7")
             with col2:
                 motif_abs = st.text_input("Motif de l'absence :", placeholder="ex: Certificat médical...", key="txt_motif_t7")
                 fichier_pdf = st.file_uploader("Joindre le justificatif (PDF)", type=["pdf"], key="file_pdf_t7")
@@ -1545,7 +1607,9 @@ with t7:
             submit_valider = st.form_submit_button("🚀 ENVOYER MA DEMANDE")
 
         if submit_valider:
-            if not fichier_pdf:
+            if not etudiant_select or not matiere_select:
+                st.error("❌ Veuillez renseigner votre nom et la matière concernée.")
+            elif not fichier_pdf:
                 st.error("❌ Vous devez joindre un fichier PDF.")
             else:
                 try:
