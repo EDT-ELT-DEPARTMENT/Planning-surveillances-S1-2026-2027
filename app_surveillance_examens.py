@@ -12,8 +12,9 @@ import time
 # 1. CONFIGURATION & MÉMOIRE
 # ======================================================================================
 TITRE_OFFICIEL = "Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA"
-NOM_SOURCE = "dataEDT-ELT-S2-2026.xlsx"
-FILE_EMAILS = "Permanents-Vacataires-ELT-2025-2026.xlsx"
+# === FICHIER SOURCE UNIQUE ===
+# En-tête attendu : Enseignement | Code | Nom | Prénom | Qualité | Grade | Email | Téléphone | Promotion
+NOM_SOURCE = "DATA-ASSIDUITE-2026.xlsx"
 TABLE_NAME = "surveillances_2026"
 
 COLS_ORDRE = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion']
@@ -67,8 +68,8 @@ def charger_donnees_locales(path):
             return pd.DataFrame()
     return pd.DataFrame()
 
-FILE_DATA_A = "DATA-ASSUIDUITE-2026.xlsx"
-FILE_LISTE_A = "Liste des étudiants-2025-2026.xlsx"
+FILE_DATA_A = NOM_SOURCE  # Source unique (remplace l'ancien DATA-ASSUIDUITE-2026.xlsx)
+FILE_LISTE_A = "Liste des étudiants-2025-2026.xlsx"  # OPTIONNEL : liste des étudiants (Nom/Prénom/Promotion)
 
 # ======================================================================================
 # 2. FONCTIONS TECHNIQUES
@@ -85,11 +86,15 @@ def generer_excel_bytes(df):
     # Renommer et reorganiser pour l'affichage
     if 'Enseignants' in df_out.columns:
         df_out['Surveillants'] = df_out['Enseignants']
+    # Nom complet du responsable
+    if 'Responsable' in df_out.columns:
+        df_out['Responsable'] = df_out['Responsable'].apply(lambda x: get_nom_complet(str(x)) if pd.notna(x) else "")
     cols_wanted = ['Enseignements', 'Code', 'Responsable', 'Surveillants', 'Horaire', 'Jours', 'Lieu', 'Promotion']
     for c in cols_wanted:
         if c not in df_out.columns:
             df_out[c] = ""
     df_out = df_out[cols_wanted]
+    df_out = _fusionner_cellules(df_out)
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df_out.to_excel(writer, index=False, sheet_name='Planning')
     return output.getvalue()
@@ -281,6 +286,303 @@ def generer_html_impression(grille_df, titre):
     </body></html>"""
     return html
 
+def _ecrire_feuille_excel(worksheet, df_out, titre_sheet, workbook):
+    """Ecrit une feuille Excel formatee a partir d'un DataFrame vertical."""
+    cols_display = ['Jours', 'Horaire', 'Enseignements', 'Responsable', 'Lieu', 'Promotion', 'Surveillants']
+
+    fmt_header = workbook.add_format({
+        'bold': True, 'bg_color': '#1f4e79', 'font_color': 'white',
+        'align': 'center', 'valign': 'vcenter', 'border': 2,
+        'font_size': 12, 'text_wrap': True
+    })
+    fmt_cell_white = workbook.add_format({
+        'text_wrap': True, 'align': 'left', 'valign': 'vcenter',
+        'border': 1, 'font_size': 10, 'bg_color': '#ffffff'
+    })
+    fmt_cell_alt = workbook.add_format({
+        'text_wrap': True, 'align': 'left', 'valign': 'vcenter',
+        'border': 1, 'bg_color': '#e7f3ff', 'font_size': 10
+    })
+    fmt_cell_perm = workbook.add_format({
+        'text_wrap': True, 'align': 'left', 'valign': 'vcenter',
+        'border': 1, 'bg_color': '#d4edda', 'font_size': 10, 'bold': True
+    })
+    fmt_cell_vac = workbook.add_format({
+        'text_wrap': True, 'align': 'left', 'valign': 'vcenter',
+        'border': 1, 'bg_color': '#fff3cd', 'font_size': 10
+    })
+    fmt_title = workbook.add_format({
+        'bold': True, 'font_size': 14, 'align': 'center',
+        'valign': 'vcenter', 'bg_color': '#1f4e79', 'font_color': 'white'
+    })
+    fmt_subtitle = workbook.add_format({
+        'bold': True, 'font_size': 12, 'align': 'center',
+        'valign': 'vcenter', 'bg_color': '#d9e2f3', 'font_color': '#1f4e79'
+    })
+
+    worksheet.set_column(0, 0, 15)
+    worksheet.set_column(1, 1, 15)
+    worksheet.set_column(2, 2, 35)
+    worksheet.set_column(3, 3, 25)
+    worksheet.set_column(4, 4, 20)
+    worksheet.set_column(5, 5, 18)
+    worksheet.set_column(6, 6, 40)
+
+    n_rows = len(df_out)
+    n_cols = len(cols_display)
+
+    worksheet.merge_range(0, 0, 0, n_cols - 1, TITRE_OFFICIEL, fmt_title)
+    worksheet.set_row(0, 30)
+
+    worksheet.merge_range(1, 0, 1, n_cols - 1, titre_sheet, fmt_subtitle)
+    worksheet.set_row(1, 25)
+
+    for col in range(n_cols):
+        worksheet.write(2, col, cols_display[col], fmt_header)
+    worksheet.set_row(2, 25)
+
+    # Format pour cellules fusionnees (centre vertical)
+    fmt_merge = workbook.add_format({
+        'text_wrap': True, 'align': 'center', 'valign': 'vcenter',
+        'border': 1, 'font_size': 10, 'bold': True, 'bg_color': '#f0f8ff'
+    })
+    fmt_merge_alt = workbook.add_format({
+        'text_wrap': True, 'align': 'center', 'valign': 'vcenter',
+        'border': 1, 'font_size': 10, 'bold': True, 'bg_color': '#e7f3ff'
+    })
+
+    # Colonnes a fusionner : Jours(0), Horaire(1), Enseignements(2), Promotion(5)
+    cols_fusion_idx = [0, 1, 2, 5]
+    all_groupes = {}
+
+    for col_idx in cols_fusion_idx:
+        if col_idx >= n_cols:
+            continue
+        groupes = []
+        current_val = None
+        current_start = None
+        for row_idx in range(n_rows):
+            val = df_out.iloc[row_idx, col_idx]
+            if str(val) != "":
+                if current_val is not None:
+                    groupes.append((current_start, row_idx - 1, current_val))
+                current_val = val
+                current_start = row_idx
+        if current_val is not None:
+            groupes.append((current_start, n_rows - 1, current_val))
+        all_groupes[col_idx] = groupes
+
+    # Ecrire les donnees (sauf colonnes fusionnees)
+    skip_cols = set(cols_fusion_idx)
+    for row_idx in range(n_rows):
+        actual_row = row_idx + 3
+        fmt_base = fmt_cell_alt if row_idx % 2 == 0 else fmt_cell_white
+        worksheet.set_row(actual_row, 35)
+
+        for col_idx in range(n_cols):
+            if col_idx in skip_cols:
+                continue
+
+            val = df_out.iloc[row_idx, col_idx]
+            cell_val = str(val) if pd.notna(val) else ""
+
+            if col_idx == 6 and cell_val:
+                noms_ens = [n.strip() for n in cell_val.split(" / ") if n.strip()]
+                has_perm = any(n in LISTE_PERMANENTS for n in noms_ens)
+                has_vac = any(n in LISTE_VACATAIRES for n in noms_ens)
+
+                if has_perm and not has_vac:
+                    fmt_use = fmt_cell_perm
+                elif has_vac and not has_perm:
+                    fmt_use = fmt_cell_vac
+                else:
+                    fmt_use = fmt_base
+            else:
+                fmt_use = fmt_base
+
+            worksheet.write(actual_row, col_idx, cell_val, fmt_use)
+
+    # Fusionner les cellules par colonne et par groupe
+    for col_idx, groupes in all_groupes.items():
+        for start, end, val in groupes:
+            if end > start:
+                fmt_f = fmt_merge_alt if start % 2 == 0 else fmt_merge
+                worksheet.merge_range(start + 3, col_idx, end + 3, col_idx, str(val), fmt_f)
+            else:
+                fmt_f = fmt_merge_alt if start % 2 == 0 else fmt_merge
+                worksheet.write(start + 3, col_idx, str(val), fmt_f)
+
+def generer_excel_global_par_promo(df):
+    """Genere un fichier Excel avec UNE FEUILLE PAR PROMOTION."""
+    output = io.BytesIO()
+
+    # Extraire les promotions uniques
+    promos_uniques = set()
+    for p in df['Promotion'].dropna().unique():
+        for sub in str(p).split(' / '):
+            promos_uniques.add(sub.strip())
+    promos_uniques = sorted(promos_uniques)
+
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        workbook = writer.book
+
+        for promo in promos_uniques:
+            df_promo = df[df['Promotion'].str.contains(promo, na=False)].copy()
+            if df_promo.empty:
+                continue
+
+            # Preparation des donnees
+            cols_display = ['Jours', 'Horaire', 'Enseignements', 'Responsable', 'Lieu', 'Promotion', 'Surveillants']
+            if 'Enseignants' in df_promo.columns:
+                df_promo['Surveillants'] = df_promo['Enseignants']
+            # Nom complet du responsable
+            if 'Responsable' in df_promo.columns:
+                df_promo['Responsable'] = df_promo['Responsable'].apply(lambda x: get_nom_complet(str(x)) if pd.notna(x) else "")
+            for c in cols_display:
+                if c not in df_promo.columns:
+                    df_promo[c] = ""
+            df_promo = df_promo[cols_display]
+
+            df_promo['__sort_date'] = pd.to_datetime(df_promo['Jours'], format='%d/%m/%Y', errors='coerce')
+            df_promo = df_promo.sort_values(['__sort_date', 'Horaire']).drop(columns=['__sort_date'])
+            df_promo = _fusionner_cellules(df_promo)
+
+            sheet_name = str(promo)[:31]  # Excel limite a 31 caracteres
+            df_promo.to_excel(writer, sheet_name=sheet_name, index=False, startrow=3, header=False)
+            worksheet = writer.sheets[sheet_name]
+            _ecrire_feuille_excel(worksheet, df_promo, f"Planning {promo}", workbook)
+
+        # Feuille "RECAPITULATIF" avec tout
+        df_all = df.copy()
+        if 'Enseignants' in df_all.columns:
+            df_all['Surveillants'] = df_all['Enseignants']
+        # Nom complet du responsable
+        if 'Responsable' in df_all.columns:
+            df_all['Responsable'] = df_all['Responsable'].apply(lambda x: get_nom_complet(str(x)) if pd.notna(x) else "")
+        for c in cols_display:
+            if c not in df_all.columns:
+                df_all[c] = ""
+        df_all = df_all[cols_display]
+        df_all['__sort_date'] = pd.to_datetime(df_all['Jours'], format='%d/%m/%Y', errors='coerce')
+        df_all = df_all.sort_values(['__sort_date', 'Horaire']).drop(columns=['__sort_date'])
+        df_all = _fusionner_cellules(df_all)
+
+        df_all.to_excel(writer, sheet_name="RECAPITULATIF", index=False, startrow=3, header=False)
+        worksheet_all = writer.sheets["RECAPITULATIF"]
+        _ecrire_feuille_excel(worksheet_all, df_all, "Planning Global - Toutes Promotions", workbook)
+
+    return output.getvalue()
+
+def generer_html_global_par_promo(df, titre="Planning Global"):
+    """Genere un HTML avec UNE SECTION PAR PROMOTION + sauts de page."""
+    promos_uniques = set()
+    for p in df['Promotion'].dropna().unique():
+        for sub in str(p).split(' / '):
+            promos_uniques.add(sub.strip())
+    promos_uniques = sorted(promos_uniques)
+
+    html = f"""<html><head><meta charset='utf-8'><style>
+        @page {{ size: landscape; }}
+        @media print {{
+            .no-print {{ display: none !important; }}
+            body {{ margin: 0; padding: 10px; }}
+            .page-break {{ page-break-after: always; }}
+        }}
+        body {{ font-family: Arial, sans-serif; margin: 20px; color: #333; }}
+        h2 {{ text-align: center; color: #1f4e79; margin-bottom: 5px; }}
+        h3 {{ text-align: center; color: #555; margin-top: 0; margin-bottom: 10px; }}
+        h4 {{ text-align: center; color: #1f4e79; margin: 15px 0 10px 0; font-size: 16px; background: #d9e2f3; padding: 8px; border-radius: 4px; }}
+        table {{ border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 11px; }}
+        th, td {{ border: 1px solid #444; padding: 8px; text-align: center; vertical-align: middle; }}
+        th {{ background: #1f4e79; color: white; font-weight: bold; font-size: 12px; }}
+        tr:nth-child(even) td {{ background: #f2f2f2; }}
+        tr:nth-child(odd) td {{ background: #ffffff; }}
+        td {{ line-height: 1.4; }}
+        .footer {{ text-align: center; margin-top: 20px; font-size: 10px; color: #777; }}
+        .print-btn {{ background: #1f4e79; color: white; padding: 12px 24px; border: none; 
+                      border-radius: 6px; font-size: 14px; cursor: pointer; margin: 20px auto; display: block; }}
+        .print-btn:hover {{ background: #163a5c; }}
+        .notice {{ text-align: center; color: #666; font-size: 12px; margin-bottom: 10px; }}
+        .sep-promo {{ border-top: 3px solid #1f4e79; margin: 30px 0; }}
+    </style></head><body>
+        <div class='no-print'>
+            <button class='print-btn' onclick="window.print()">🖨️ Imprimer / Enregistrer en PDF</button>
+            <p class='notice'>💡 Astuce : Cliquez sur le bouton ci-dessus, puis choisissez "Enregistrer au format PDF" dans les options d'impression.</p>
+        </div>
+        <h2>{TITRE_OFFICIEL}</h2>
+        <h3>{titre}</h3>
+    """
+
+    for promo in promos_uniques:
+        df_promo = df[df['Promotion'].str.contains(promo, na=False)].copy()
+        if df_promo.empty:
+            continue
+
+        grille_p = creer_grille_edt(df_promo)
+        if not grille_p.empty:
+            grille_html = grille_p.copy()
+            grille_html = grille_html.map(lambda x: x.replace('\n', '<br>') if x else '')
+            html += f"""
+            <div class='page-break'>
+                <h4>🎓 PROMOTION : {promo}</h4>
+                {grille_html.to_html(escape=False)}
+            </div>
+            """
+
+    # Grille globale a la fin
+    grille_global = creer_grille_edt(df)
+    if not grille_global.empty:
+        grille_html = grille_global.copy()
+        grille_html = grille_html.map(lambda x: x.replace('\n', '<br>') if x else '')
+        html += f"""
+        <div class='page-break'>
+            <h4>🌍 RECAPITULATIF GLOBAL</h4>
+            {grille_html.to_html(escape=False)}
+        </div>
+        """
+
+    html += f"<div class='footer'>Genere le {datetime.now().strftime('%d/%m/%Y a %H:%M')}</div></body></html>"
+    return html
+
+def _fusionner_cellules(df):
+    """Dans un DataFrame trie par Jours/Horaire/Enseignements,
+    vide les colonnes Jours, Horaire, Enseignements, Promotion quand identiques
+    a la ligne precedente (meme jour, meme horaire, meme matiere, meme promo).
+    Ajoute le jour de la semaine en FRANCAIS a cote de la date."""
+    df = df.copy()
+    if df.empty:
+        return df
+
+    # Traduction des jours anglais -> francais
+    JOURS_FR = {
+        'Monday': 'Lundi', 'Tuesday': 'Mardi', 'Wednesday': 'Mercredi',
+        'Thursday': 'Jeudi', 'Friday': 'Vendredi', 'Saturday': 'Samedi', 'Sunday': 'Dimanche'
+    }
+
+    # Ajouter le jour de la semaine a cote de la date
+    if 'Jours' in df.columns:
+        def format_jour(x):
+            dt = pd.to_datetime(x, format='%d/%m/%Y', errors='coerce')
+            if pd.notna(dt):
+                jour_en = dt.strftime('%A')
+                jour_fr = JOURS_FR.get(jour_en, jour_en)
+                return f"{jour_fr.upper()} {x}"
+            return str(x)
+        df['Jours'] = df['Jours'].apply(format_jour)
+
+    # Colonnes a fusionner
+    cols_fusion = ['Jours', 'Horaire', 'Enseignements', 'Promotion']
+    for col in cols_fusion:
+        if col not in df.columns:
+            continue
+        prev_col = f'__prev_{col}'
+        df[prev_col] = df[col].shift(1)
+        mask = (df[col] == df[prev_col])
+        df.loc[mask, col] = ""
+        df = df.drop(columns=[prev_col], errors='ignore')
+
+    return df
+
 def generer_excel_bytes_vertical(df, titre_sheet="Planning"):
     """Genere un fichier Excel VERTICAL (ligne par ligne) avec grille coloree."""
     output = io.BytesIO()
@@ -291,6 +593,9 @@ def generer_excel_bytes_vertical(df, titre_sheet="Planning"):
     # Copier Enseignants -> Surveillants
     if 'Enseignants' in df_out.columns:
         df_out['Surveillants'] = df_out['Enseignants']
+    # Nom complet du responsable
+    if 'Responsable' in df_out.columns:
+        df_out['Responsable'] = df_out['Responsable'].apply(lambda x: get_nom_complet(str(x)) if pd.notna(x) else "")
     for c in cols_display:
         if c not in df_out.columns:
             df_out[c] = ""
@@ -300,6 +605,7 @@ def generer_excel_bytes_vertical(df, titre_sheet="Planning"):
     df_out = df_out.copy()
     df_out['__sort_date'] = pd.to_datetime(df_out['Jours'], format='%d/%m/%Y', errors='coerce')
     df_out = df_out.sort_values(['__sort_date', 'Horaire']).drop(columns=['__sort_date'])
+    df_out = _fusionner_cellules(df_out)
 
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         # Ecrire les donnees a partir de la ligne 3 (sans en-tete, on le fait manuellement)
@@ -363,13 +669,48 @@ def generer_excel_bytes_vertical(df, titre_sheet="Planning"):
             worksheet.write(2, col, cols_display[col], fmt_header)
         worksheet.set_row(2, 25)
 
+        # Format pour cellules fusionnees (centre vertical)
+        fmt_merge = workbook.add_format({
+            'text_wrap': True, 'align': 'center', 'valign': 'vcenter',
+            'border': 1, 'font_size': 10, 'bold': True, 'bg_color': '#f0f8ff'
+        })
+        fmt_merge_alt = workbook.add_format({
+            'text_wrap': True, 'align': 'center', 'valign': 'vcenter',
+            'border': 1, 'font_size': 10, 'bold': True, 'bg_color': '#e7f3ff'
+        })
+
+        # Colonnes a fusionner : Jours(0), Horaire(1), Enseignements(2), Promotion(5)
+        cols_fusion_idx = [0, 1, 2, 5]
+        all_groupes = {}
+
+        for col_idx in cols_fusion_idx:
+            if col_idx >= n_cols:
+                continue
+            groupes = []
+            current_val = None
+            current_start = None
+            for row_idx in range(n_rows):
+                val = df_out.iloc[row_idx, col_idx]
+                if str(val) != "":
+                    if current_val is not None:
+                        groupes.append((current_start, row_idx - 1, current_val))
+                    current_val = val
+                    current_start = row_idx
+            if current_val is not None:
+                groupes.append((current_start, n_rows - 1, current_val))
+            all_groupes[col_idx] = groupes
+
         # Donnees avec alternance de couleurs + couleur selon type enseignant
+        skip_cols = set(cols_fusion_idx)
         for row_idx in range(n_rows):
             actual_row = row_idx + 3
             fmt_base = fmt_cell_alt if row_idx % 2 == 0 else fmt_cell_white
             worksheet.set_row(actual_row, 35)
 
             for col_idx in range(n_cols):
+                if col_idx in skip_cols:
+                    continue
+
                 val = df_out.iloc[row_idx, col_idx]
                 cell_val = str(val) if pd.notna(val) else ""
 
@@ -389,6 +730,16 @@ def generer_excel_bytes_vertical(df, titre_sheet="Planning"):
                     fmt_use = fmt_base
 
                 worksheet.write(actual_row, col_idx, cell_val, fmt_use)
+
+        # Fusionner les cellules par colonne et par groupe
+        for col_idx, groupes in all_groupes.items():
+            for start, end, val in groupes:
+                if end > start:
+                    fmt_f = fmt_merge_alt if start % 2 == 0 else fmt_merge
+                    worksheet.merge_range(start + 3, col_idx, end + 3, col_idx, str(val), fmt_f)
+                else:
+                    fmt_f = fmt_merge_alt if start % 2 == 0 else fmt_merge
+                    worksheet.write(start + 3, col_idx, str(val), fmt_f)
     return output.getvalue()
 
 
@@ -507,7 +858,7 @@ def generer_html_pv_pack(df_session):
             </div>
             <h3 style='text-align:center; margin:5px;'>PROCES-VERBAL DE SURVEILLANCE</h3>
             <p><b>Matière :</b> {mat} | <b>Lieu:</b> {lieu} | <b>Date:</b> {jour}</p>
-            <p><b>Promotion:</b> {promo} | <b>Chargé de matière:</b> {data.get('Responsable', pd.Series(['N/A'])).iloc[0]}</p>
+            <p><b>Promotion:</b> {promo} | <b>Chargé de matière:</b> {get_nom_complet(str(data.get('Responsable', pd.Series(['N/A'])).iloc[0]))}</p>
             <table>
                 <tr style='background-color:#f2f2f2;'>
                     <th>Étudiants prévus</th><th>Absences (Nombre)</th><th>Copies rendues (Nombre)</th>
@@ -1008,11 +1359,11 @@ with t4:
                 st.dataframe(grille_global, use_container_width=True)
                 cgx, cgh, cgp = st.columns(3)
                 with cgx:
-                    st.download_button("📊 Excel Global", data=generer_excel_bytes_vertical(df_db_global, "Planning Global"), file_name="Planning_Global.xlsx", use_container_width=True, key="dl_xl_g")
+                    st.download_button("📊 Excel Global (1 feuille/promo)", data=generer_excel_global_par_promo(df_db_global), file_name="Planning_Global.xlsx", use_container_width=True, key="dl_xl_g")
                 with cgh:
-                    st.download_button("🌐 HTML Global", data=grille_to_html(grille_global, "Planning Global"), file_name="Planning_Global.html", mime="text/html", use_container_width=True, key="dl_ht_g")
+                    st.download_button("🌐 HTML Global (1 page/promo)", data=generer_html_global_par_promo(df_db_global, "Planning Global"), file_name="Planning_Global.html", mime="text/html", use_container_width=True, key="dl_ht_g")
                 with cgp:
-                    st.download_button("📄 PDF (Impression)", data=generer_html_impression(grille_global, "Planning Global - Surveillances S2 2026"), file_name="Planning_Global.html", mime="text/html", use_container_width=True, key="dl_pd_g")
+                    st.download_button("📄 PDF Global (1 page/promo)", data=generer_html_global_par_promo(df_db_global, "Planning Global - Surveillances S2 2026"), file_name="Planning_Global_PDF.html", mime="text/html", use_container_width=True, key="dl_pd_g")
             else:
                 st.info("Données insuffisantes pour générer la grille globale.")
 
