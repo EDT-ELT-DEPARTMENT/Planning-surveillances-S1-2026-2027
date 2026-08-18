@@ -12,9 +12,8 @@ import time
 # 1. CONFIGURATION & MÉMOIRE
 # ======================================================================================
 TITRE_OFFICIEL = "Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA"
-# === FICHIER SOURCE UNIQUE ===
-# En-tête attendu : Enseignement | Code | Nom | Prénom | Qualité | Grade | Email | Téléphone | Promotion
-NOM_SOURCE = "DATA-ASSIDUITE-2026.xlsx"
+NOM_SOURCE = "dataEDT-ELT-S2-2026.xlsx"
+FILE_EMAILS = "Permanents-Vacataires-ELT-2025-2026.xlsx"
 TABLE_NAME = "surveillances_2026"
 
 COLS_ORDRE = ['Enseignements', 'Code', 'Enseignants', 'Horaire', 'Jours', 'Lieu', 'Promotion']
@@ -68,8 +67,8 @@ def charger_donnees_locales(path):
             return pd.DataFrame()
     return pd.DataFrame()
 
-FILE_DATA_A = NOM_SOURCE  # Source unique (remplace l'ancien DATA-ASSUIDUITE-2026.xlsx)
-FILE_LISTE_A = "Liste des étudiants-2025-2026.xlsx"  # OPTIONNEL : liste des étudiants (Nom/Prénom/Promotion)
+FILE_DATA_A = "DATA-ASSUIDUITE-2026.xlsx"
+FILE_LISTE_A = "Liste des étudiants-2025-2026.xlsx"
 
 # ======================================================================================
 # 2. FONCTIONS TECHNIQUES
