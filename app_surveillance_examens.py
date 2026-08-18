@@ -106,7 +106,7 @@ def charger_fichiers():
     d_em = {}
     is_vacataire = {}
 
-    FILE_CONTACTS = "Permanents-Vacataires-ELT2-2025-2026.xlsx"
+    FILE_CONTACTS = "DATA-ASSIDUITE-2026.xlsx"
 
     if os.path.exists(FILE_CONTACTS):
         try:
